@@ -728,12 +728,23 @@ export function mountCoordinatedPaperScene(
       refreshPickingBounds();
       const bounds = renderer.domElement.getBoundingClientRect();
       const raycaster = new THREE.Raycaster();
+      // A nearly edge-on leaf can be only a few pixels wide. Probe a small
+      // screen-space halo, retaining the actual hit point as the drag anchor.
+      const probes = [[0, 0]];
+      for (const radius of [8, 16, 24]) {
+        for (let i = 0; i < 8; i++) probes.push([Math.cos(i * Math.PI / 4) * radius, Math.sin(i * Math.PI / 4) * radius]);
+      }
+      const seen = new Set<string>();
+      for (const [dx, dy] of probes) {
       raycaster.setFromCamera(new THREE.Vector2(
-        (clientX - bounds.left) / bounds.width * 2 - 1,
-        -(clientY - bounds.top) / bounds.height * 2 + 1,
+        (clientX + dx - bounds.left) / bounds.width * 2 - 1,
+        -(clientY + dy - bounds.top) / bounds.height * 2 + 1,
       ), camera);
-      const hit = raycaster.intersectObjects(displayMeshes, false).find(hit => hit.object.visible);
-      if (!hit?.face) return false;
+      for (const hit of raycaster.intersectObjects(displayMeshes, false)) {
+      if (!hit.object.visible || !hit.face) continue;
+      const key = `${hit.object.uuid}:${hit.faceIndex}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const mesh = hit.object as THREE.Mesh;
       const { a, b, c } = hit.face;
       const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
@@ -764,6 +775,12 @@ export function mountCoordinatedPaperScene(
         }
         return (low + high) / 2;
       };
+      const current = stateAtTime(sequenceTime);
+      const currentAngle = 90 + current.leftAngle - current.rightAngle;
+      pose(currentAngle < 90 ? currentAngle + 30 : currentAngle - 30);
+      const mobility = projectedGrab().distanceTo(initialPoint);
+      pose(currentAngle);
+      if (mobility < 1) continue;
       const path: Array<{ point: THREE.Vector2; time: number }> = [];
       // Follow this exact barycentric mesh point through the authored hinge
       // rig. Projection makes the grab work from orbit views as well as front.
@@ -771,14 +788,16 @@ export function mountCoordinatedPaperScene(
         pose(angle);
         path.push({ point: projectedGrab(), time: timeForAngle(angle) });
       }
-      const current = stateAtTime(sequenceTime);
       pose(90 + current.leftAngle - current.rightAngle);
       // A point on the anchored panel has no useful hinge trajectory.
-      if (Math.max(...path.map(sample => sample.point.distanceTo(initialPoint))) < 8) return false;
+      if (Math.max(...path.map(sample => sample.point.distanceTo(initialPoint))) < 8) continue;
       grabOffset.set(clientX - initialPoint.x, clientY - initialPoint.y);
       grabPath = path;
       controls.enabled = false;
       return true;
+      }
+      }
+      return false;
     },
     moveGrab(clientX, clientY) {
       if (!grabPath) return null;

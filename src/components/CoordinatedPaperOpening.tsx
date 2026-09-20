@@ -96,8 +96,9 @@ export default function CoordinatedPaperOpening({
       return;
     }
     const scene = sceneRef.current;
-    if (!scene?.hitsPhoneSilhouette(event.clientX, event.clientY)) return;
+    if (!scene) return;
     const grabbed = event.button === 0 && scene.beginGrab(event.clientX, event.clientY);
+    if (!grabbed && !scene.hitsPhoneSilhouette(event.clientX, event.clientY)) return;
     stop();
     cancelAnimationFrame(foldFrame.current);
     foldDrag.current = { id: event.pointerId, time: timeRef.current, grabbed, direction: 0, lastMotion: 0 };
@@ -222,7 +223,6 @@ export default function CoordinatedPaperOpening({
       </div>
         <button ref={inspectButtonRef} type="button" aria-expanded={inspectorOpen} aria-controls={inspectorId}
           onClick={() => setInspectorOpen(!inspectorOpen)}>Inspect</button>
-        <span className="tp-opening__gesture-hint">Drag phone to fold · drag background to orbit</span>
       </div>
       <aside id={inspectorId} className="tp-opening__inspector" aria-hidden={!inspectorOpen}
         ref={(element) => element?.toggleAttribute("inert", !inspectorOpen)} aria-label="Rendering inspector"

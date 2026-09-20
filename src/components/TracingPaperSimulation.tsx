@@ -126,17 +126,6 @@ export default function TracingPaperSimulation({
           </button>
         )}
       </div>
-      <div className="tp-sim-footer" aria-hidden="true">
-        {moveView ? (
-          <>
-            <span>DRAG / ORBIT</span>
-            <span>RIGHT-DRAG / PAN</span>
-          </>
-        ) : (
-          <span>SLIDE EITHER PAGE TOWARD CENTER / FOLD</span>
-        )}
-        <span>SCROLL / ZOOM</span>
-      </div>
     </figure>
   );
 }

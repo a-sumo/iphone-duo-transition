@@ -23,6 +23,6 @@ function App() {
     return () => { active = false; };
   }, [duo]);
   return <><nav aria-label="Experiments"><a href="#tracing-paper" aria-current={!duo ? 'page' : undefined}>Tracing Paper</a><a href="#iphone-duo" aria-current={duo ? 'page' : undefined}>iPhone Duo Transition</a><a className="source" href="https://github.com/a-sumo/tracing-paper">Source ↗</a></nav>
-    <main>{ready ? (duo ? <CoordinatedPaperOpening standalone /> : <TracingPaperSimulation standalone />) : <div className="notice" role="status">{ready === null ? 'Loading…' : <><h1>Supply the demo assets</h1><p>See the README for the local asset paths. Third-party assets are not included in the code license.</p><a href={`https://armandsumo.com/labs/${duo ? 'iphone-duo-opening' : 'tracing-paper'}/`}>Open the hosted demo ↗</a></>}</div>}</main></>;
+    <main>{ready ? (duo ? <CoordinatedPaperOpening standalone /> : <TracingPaperSimulation standalone />) : <div className="notice" role="status">{ready === null ? 'Loading…' : <><h1>Supply the demo assets</h1><p>See the README for the local asset paths. Third-party assets are not included in the code license.</p><a href={`https://armandsumo.com/labs/${duo ? 'iphone-duo-transition' : 'tracing-paper'}/`}>Open the hosted demo ↗</a></>}</div>}</main></>;
 }
 createRoot(document.getElementById('root')!).render(<App />);
