@@ -1,9 +1,9 @@
-# Tracing Paper
+# iPhone Duo Transition
 
-Two interactive Three.js experiments by Armand Sumo: tracing paper lifted from a fixed image, and the iPhone Duo opening/closing transition.
+iPhone Duo opening and closing transitions recreated in Three.js by Armand Sumo, with a supporting interactive tracing-paper experiment.
 
-- [Tracing Paper — live lab](https://armandsumo.com/labs/tracing-paper/)
 - [iPhone Duo Transition — live lab](https://armandsumo.com/labs/iphone-duo-transition/)
+- [Tracing Paper — supporting lab](https://armandsumo.com/labs/tracing-paper/)
 
 The article is maintained separately in the `armandsumo` website repository and is not included here.
 
