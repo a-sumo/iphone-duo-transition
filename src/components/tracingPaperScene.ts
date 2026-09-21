@@ -309,9 +309,11 @@ export function mountTracingPaperScene(
 
   function fitDistance() {
     const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+    // Frame the image and folding boundary, rather than the oversized sheet.
+    // Leave room around the image for the lifted paper to remain legible.
     return Math.max(
-      (paperHeight * 1.05) / (2 * Math.tan(halfFov)),
-      (paperWidth * 1.05) / (2 * Math.tan(halfFov) * camera.aspect),
+      (screenHeight * 1.5) / (2 * Math.tan(halfFov)),
+      (screenWidth * 1.5) / (2 * Math.tan(halfFov) * camera.aspect),
     );
   }
   function resetTopView() {

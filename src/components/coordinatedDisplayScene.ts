@@ -114,6 +114,25 @@ function fitImagePlane(screen: THREE.Mesh): ImagePlane {
   const axisU = new THREE.Vector3(x.y, y.y, z.y);
   const axisV = new THREE.Vector3(x.z, y.z, z.z);
   const normal = new THREE.Vector3().crossVectors(axisU, axisV).normalize();
+  // UV winding is not a reliable front/back convention. Orient each reference
+  // plane using its own registered display's largest triangle.
+  const indices = screen.geometry.index;
+  if (indices) {
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+    const faceNormal = new THREE.Vector3();
+    let largest = 0;
+    for (let i = 0; i < indices.count; i += 3) {
+      screen.localToWorld(screen.getVertexPosition(indices.getX(i), a));
+      screen.localToWorld(screen.getVertexPosition(indices.getX(i + 1), b));
+      screen.localToWorld(screen.getVertexPosition(indices.getX(i + 2), c));
+      const triangle = new THREE.Triangle(a, b, c);
+      if (triangle.getArea() > largest) {
+        largest = triangle.getArea();
+        triangle.getNormal(faceNormal);
+      }
+    }
+    if (normal.dot(faceNormal) < 0) normal.negate();
+  }
   // This is an analytical sampling surface, not rendered geometry, so it can
   // coincide exactly with the registered display without z-fighting. The
   // paper begins directly on the image and acquires distance only by folding.
@@ -237,7 +256,11 @@ export function mountCoordinatedPaperScene(
   const foldQuaternion = new THREE.Quaternion();
   const displayMeshes: THREE.Mesh[] = [];
   let grabPath: Array<{ point: THREE.Vector2; time: number }> | null = null;
-  let grabOffset = new THREE.Vector2();
+  const grabPointer = new THREE.Vector2();
+  let grabIndex = 0;
+  const viewToEye = { value: new THREE.Vector3(0, 0, 1) };
+  const leafFacing = { value: 1 };
+  let leafFace: { mesh: THREE.Mesh; a: number; b: number; c: number } | null = null;
   const hardwareVisibility: Array<{ mesh: THREE.Mesh; visible: boolean }> = [];
   const cameraGlass: Array<{ mesh: THREE.Mesh; material: THREE.Material; visible: boolean }> = [];
   const imagePlaneVisuals: ImagePlaneVisual[] = [];
@@ -255,7 +278,6 @@ export function mountCoordinatedPaperScene(
   });
   const inspectionUniform = { value: 0 };
   const hingeAngle = { value: 180 };
-  const leftVisible = { value: 0 };
   const outerActive = { value: 1 };
   const leftPaper = { value: 0 };
   const leftAngle = { value: 90 };
@@ -291,6 +313,19 @@ export function mountCoordinatedPaperScene(
         throw new Error(`Unexpected display topology for ${node}`);
       }
       const screenTexture = outer ? outerTexture : innerTexture;
+      if (!outer) {
+        const uv = screen.geometry.getAttribute("uv");
+        const index = screen.geometry.index!;
+        let largest = 0;
+        const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+        for (let i = 0; i < index.count; i += 3) {
+          const ia = index.getX(i), ib = index.getX(i + 1), ic = index.getX(i + 2);
+          if ((uv.getX(ia) + uv.getX(ib) + uv.getX(ic)) / 3 >= 0.4) continue;
+          screen.getVertexPosition(ia, a); screen.getVertexPosition(ib, b); screen.getVertexPosition(ic, c);
+          const area = new THREE.Triangle(a, b, c).getArea();
+          if (area > largest) { largest = area; leafFace = { mesh: screen, a: ia, b: ib, c: ic }; }
+        }
+      }
       const material = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         map: screenTexture,
@@ -310,7 +345,6 @@ export function mountCoordinatedPaperScene(
         shader.uniforms.uImageSize = { value: imageSize };
         shader.uniforms.uDarkField = { value: darkField };
         shader.uniforms.uOuterScreen = { value: outer ? 1 : 0 };
-        shader.uniforms.uLeftVisible = leftVisible;
         shader.uniforms.uOuterActive = outerActive;
         shader.uniforms.uLeftPaper = leftPaper;
         shader.uniforms.uLeftAngle = leftAngle;
@@ -320,6 +354,8 @@ export function mountCoordinatedPaperScene(
         shader.uniforms.uEdgeDarkening = edgeDarkening;
         shader.uniforms.uInspectionMode = inspectionUniform;
         shader.uniforms.uHingeAngle = hingeAngle;
+        shader.uniforms.uViewToEye = viewToEye;
+        shader.uniforms.uLeafFacing = leafFacing;
         shader.uniforms.uPlaneOrigin = plane.origin;
         shader.uniforms.uPlaneU = plane.axisU;
         shader.uniforms.uPlaneV = plane.axisV;
@@ -338,7 +374,6 @@ export function mountCoordinatedPaperScene(
             uniform vec2 uImageSize;
             uniform vec3 uDarkField;
             uniform float uOuterScreen;
-            uniform float uLeftVisible;
             uniform float uOuterActive;
             uniform float uLeftPaper;
             uniform float uLeftAngle;
@@ -348,6 +383,8 @@ export function mountCoordinatedPaperScene(
             uniform float uEdgeDarkening;
             uniform float uInspectionMode;
             uniform float uHingeAngle;
+            uniform vec3 uViewToEye;
+            uniform float uLeafFacing;
             uniform vec3 uPlaneOrigin;
             uniform vec3 uPlaneU;
             uniform vec3 uPlaneV;
@@ -426,7 +463,7 @@ export function mountCoordinatedPaperScene(
             } else {
               // Orthographic projection: every pixel sees the scene along
               // the same ray, irrespective of its position on the display.
-              vec3 toEye = normalize(cameraPosition);
+              vec3 toEye = uViewToEye;
               vec3 ray = -toEye;
               float gap = abs(dot(vPaperWorld - uPlaneOrigin, uPlaneNormal));
               // Both wallpapers remain on their stationary registered image
@@ -438,15 +475,14 @@ export function mountCoordinatedPaperScene(
                 (planeDenominator < 0.0 ? -0.025 : 0.025) : planeDenominator;
               float planeDistance = dot(uPlaneOrigin - vPaperWorld, uPlaneNormal) /
                 planeDenominator;
-              // Contact must retain full image brightness. Fade only after
-              // the backing plane lies behind the ray origin, allowing a
-              // small tolerance for the registered mesh surface.
               float stencilActive = 1.0 - smoothstep(0.001, 0.025, -planeDistance);
               vec2 fixedUv = imagePlaneUv(vPaperWorld, ray);
               fixedUv = mix(fixedUv, coverImageUv(fixedUv), uOuterScreen);
               vec3 fixedImage = sampleDisplay(fixedUv);
-              float coverage = mix(mix(step(0.5, screenUv.x), 1.0, uLeftVisible),
-                                   1.0, uOuterScreen);
+              // Rasterization already determines which screen faces are visible.
+              // A fold-angle cutoff incorrectly blanks the inner leaf in orbit
+              // views where it is visible before the front-view reveal point.
+              float coverage = 1.0;
               // The coordinated transition belongs entirely to the moving
               // half and reaches zero at the shared hinge UV. Scattering rays
               // may still cross the hinge and sample the full wallpaper.
@@ -476,7 +512,10 @@ export function mountCoordinatedPaperScene(
                   vec3(0.0, 1.0, 0.0) : uPlaneNormal;
                 vec3 axisX = normalize(cross(axisGuide, ray));
                 vec3 axisY = cross(ray, axisX);
-                float scatter = 0.55 * (0.10 + 0.16 * grazing) * uBlurIntensity;
+                // Taper the scattering radius, not the opacity of a blurred
+                // overlay: mixing sharp artwork back in leaves its finite
+                // projected boundary visible through the blur off-axis.
+                float scatter = 0.55 * (0.10 + 0.16 * grazing) * uBlurIntensity * paperAmount;
                 vec3 sharp = fixedImage;
                 float revealWeight = 1.0 - smoothstep(82.0, 90.0, uLeftAngle);
                 // The backing image is coincident with the registered screen
@@ -484,9 +523,8 @@ export function mountCoordinatedPaperScene(
                 // do not inject an artificial recessed backdrop.
                 float effectiveGap = gap;
                 vec3 scatterOrigin = vPaperWorld;
-                float footprint = effectiveGap * scatter /
-                  max(abs(dot(ray, uPlaneNormal)), 0.025) * 405.0 / uImageSize.x;
-                float blurBlend = smoothstep(0.4, 1.4, footprint);
+                float blurBlend = smoothstep(0.0, 0.002, effectiveGap) *
+                  smoothstep(0.0, 0.001, scatter);
                 vec3 under = sharp;
                 if (blurBlend > 0.001) {
                   vec3 blurred = vec3(0.0);
@@ -494,8 +532,8 @@ export function mountCoordinatedPaperScene(
                   float sampleWidth = effectiveGap * scatter * 2432.0 / uImageSize.x /
                     max(abs(dot(ray, uPlaneNormal)), 0.1) / sqrt(96.0);
                   float mipBias = max(0.0, log2(max(1.0, sampleWidth * 0.8)));
-                  float edgeFeather = max(1.5 / 2432.0,
-                                          1.5 * sampleWidth / 2432.0);
+                  float edgeFeather = max(max(fwidth(fixedUv.x), fwidth(fixedUv.y)),
+                    max(1.5 / 2432.0, 1.5 * sampleWidth / 2432.0));
                   // A stable low-discrepancy disc avoids per-pixel Monte Carlo
                   // speckle; mip filtering integrates between sparse rays.
                   // Every ray contributes the same energy. Rays missing the
@@ -540,7 +578,7 @@ export function mountCoordinatedPaperScene(
                 float transmission = pow(clamp(0.89 + fiber * 0.008, 0.0, 0.97), opticalDepth)
                   * distanceLoss;
                 vec3 dimFill = vec3(0.035, 0.041, 0.047) + fiber * 0.005;
-                float interiorAttenuation = (1.0 - uOuterScreen) *
+                float interiorAttenuation = (1.0 - uOuterScreen) * paperAmount *
                   smoothstep(0.0, 0.025, gap);
                 vec3 paperColor = mix(under, mix(dimFill, under, transmission),
                   interiorAttenuation);
@@ -553,7 +591,9 @@ export function mountCoordinatedPaperScene(
                 float edgeShade = uEdgeDarkening *
                   min(0.60, 0.43 * freeEdge + 0.12 * horizontalEdges);
                 edgeShade = min(edgeShade, 0.95);
-                baseColor = mix(baseColor, paperColor, paperAmount);
+                // The convolution already approaches sharp at zero radius.
+                // Do not reintroduce an unfiltered image boundary here.
+                baseColor = mix(baseColor, paperColor, coverage);
                 float edgeEnabled = (uInspectionMode < 0.5 || uInspectionMode > 9.5) ? 1.0 : 0.0;
                 float darkeningAmount = edgeEnabled *
                   (1.0 - uOuterScreen) * uLeftPaper * darkeningMask;
@@ -564,15 +604,15 @@ export function mountCoordinatedPaperScene(
                 baseColor = max(vec3(0.0), baseColor -
                   paperColor * edgeShade * darkeningAmount);
               }
-              // Select the receiving display by pose, not playback direction
-              // or pause state. The same hinge pose must render identically
-              // whether reached by playback, forward scrub or reverse scrub.
-              vec2 regularUv = mix(screenUv, coverImageUv(screenUv), uOuterScreen);
-              // Model angle is 0 fully open, 180 fully closed.
-              float innerStencil = 1.0 - smoothstep(88.0, 90.0, uHingeAngle);
-              float coverStencil = smoothstep(90.0, 92.0, uHingeAngle);
-              float stencilScreen = mix(innerStencil, coverStencil, uOuterScreen);
-              diffuseColor.rgb = mix(sampleDisplay(regularUv), baseColor, stencilScreen);
+              // Keep each display on its own stationary image plane at every
+              // viewpoint. Switching to mesh UVs would abruptly change the
+              // image position as the camera crosses the plane's edge-on view.
+              // Geometry and depth determine which display is visible. The
+              // source image itself is one-sided: looking through a stencil
+              // at the back of its image plane must not reveal reversed art.
+              // Fade only near grazing incidence, without changing UV mapping.
+              float imageFacing = smoothstep(0.0, 0.06, dot(toEye, uPlaneNormal));
+              diffuseColor.rgb = mix(uDarkField, baseColor, imageFacing);
             }
             diffuseColor.a = opacity;
           `);
@@ -636,7 +676,19 @@ export function mountCoordinatedPaperScene(
   });
 
   function render() {
-    if (!disposed) renderer.render(scene, camera);
+    if (disposed) return;
+    camera.getWorldDirection(viewToEye.value).negate();
+    if (leafFace) {
+      phone?.updateMatrixWorld(true);
+      const { mesh, a, b, c } = leafFace;
+      mesh.updateWorldMatrix(true, false);
+      if (mesh instanceof THREE.SkinnedMesh) mesh.skeleton.update();
+      const va = mesh.localToWorld(mesh.getVertexPosition(a, new THREE.Vector3()));
+      const vb = mesh.localToWorld(mesh.getVertexPosition(b, new THREE.Vector3()));
+      const vc = mesh.localToWorld(mesh.getVertexPosition(c, new THREE.Vector3()));
+      leafFacing.value = new THREE.Triangle(va, vb, vc).getNormal(new THREE.Vector3()).dot(viewToEye.value);
+    }
+    renderer.render(scene, camera);
   }
 
   function resetCamera() {
@@ -671,7 +723,6 @@ export function mountCoordinatedPaperScene(
     foldQuaternion.setFromAxisAngle(foldAxis, THREE.MathUtils.degToRad(phoneAngle) / 2);
     if (phoneHinge && hingeRest) phoneHinge.quaternion.copy(hingeRest).multiply(foldQuaternion);
     if (phoneLeaf && leafRest) phoneLeaf.quaternion.copy(leafRest).multiply(foldQuaternion);
-    leftVisible.value = state.leftAngle < 89.5 ? 1 : 0;
     outerActive.value = 1 - smoothstep(0, 8, state.rightAngle);
     leftPaper.value = state.leftPaper;
     leftAngle.value = state.leftAngle;
@@ -791,7 +842,8 @@ export function mountCoordinatedPaperScene(
       pose(90 + current.leftAngle - current.rightAngle);
       // A point on the anchored panel has no useful hinge trajectory.
       if (Math.max(...path.map(sample => sample.point.distanceTo(initialPoint))) < 8) continue;
-      grabOffset.set(clientX - initialPoint.x, clientY - initialPoint.y);
+      grabPointer.set(clientX, clientY);
+      grabIndex = 180 - currentAngle;
       grabPath = path;
       controls.enabled = false;
       return true;
@@ -801,20 +853,22 @@ export function mountCoordinatedPaperScene(
     },
     moveGrab(clientX, clientY) {
       if (!grabPath) return null;
-      const pointer = new THREE.Vector2(clientX, clientY).sub(grabOffset);
-      let best = Infinity, result = sequenceTime;
-      for (let i = 0; i < grabPath.length - 1; i++) {
-        const a = grabPath[i], b = grabPath[i + 1];
-        const segment = b.point.clone().sub(a.point);
-        const alpha = THREE.MathUtils.clamp(pointer.clone().sub(a.point).dot(segment) / Math.max(segment.lengthSq(), 1e-8), 0, 1);
-        const time = THREE.MathUtils.lerp(a.time, b.time, alpha);
-        const distance = a.point.clone().addScaledVector(segment, alpha).distanceToSquared(pointer);
-        // Break near-identical projected solutions by continuity, not by
-        // snapping to an unrelated branch of the hinge arc.
-        const score = distance + Math.pow(time - sequenceTime, 2) * 0.01;
-        if (score < best) { best = score; result = time; }
+      const delta = new THREE.Vector2(clientX, clientY).sub(grabPointer);
+      grabPointer.set(clientX, clientY);
+      // Integrate only the local screen-space tangent. No global nearest
+      // search: overlapping projected arcs cannot switch rotation branches.
+      // Regularization reduces sensitivity near a projected turning point.
+      const steps = Math.max(1, Math.ceil(delta.length() / 4));
+      delta.divideScalar(steps);
+      for (let step = 0; step < steps; step++) {
+        const low = Math.max(0, Math.floor(grabIndex) - 1);
+        const high = Math.min(180, Math.ceil(grabIndex) + 1);
+        const tangent = grabPath[high].point.clone().sub(grabPath[low].point).divideScalar(high - low);
+        const change = delta.dot(tangent) / (tangent.lengthSq() + 1);
+        grabIndex = THREE.MathUtils.clamp(grabIndex + THREE.MathUtils.clamp(change, -3, 3), 0, 180);
       }
-      return result;
+      const i = Math.min(179, Math.floor(grabIndex));
+      return THREE.MathUtils.lerp(grabPath[i].time, grabPath[i + 1].time, grabIndex - i);
     },
     endGrab() { grabPath = null; controls.enabled = moveView; },
     setOrbitEnabled(enabled) {
