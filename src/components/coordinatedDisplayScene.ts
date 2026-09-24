@@ -63,7 +63,9 @@ export function stateAtTime(seconds: number): SequenceState {
   // hinge follows the single eased curve with no hold at 90°.
   const rightAngle = 90 * clamp01(open * 2);
   const leftAngle = 90 * (1 - clamp01(open * 2 - 1));
-  const paperVisibility = (angle: number) => smoothstep(0, 8, angle);
+  // The paper effect must never let go before rest: fading it over the last
+  // 8° left a sharp, visibly stenciled image just short of open/closed.
+  const paperVisibility = (angle: number) => smoothstep(0, 1.5, angle);
   return {
     rightAngle,
     leftAngle,
@@ -76,6 +78,8 @@ export function stateAtTime(seconds: number): SequenceState {
 // Object_106 is the exact 280-triangle skinned inner display; Object_72 is
 // the exact 1,175-triangle outer display. The inner halves share eight
 // triangles across UV.x = .5, so they must be partitioned per fragment.
+const BLUR_FLOOR = 0.25;
+
 const DISPLAY_MESHES = [
   { node: "Object_106", outer: false, triangles: 280 },
   { node: "Object_72", outer: true, triangles: 1175 },
@@ -337,6 +341,8 @@ export function mountCoordinatedPaperScene(
   const hingeAngle = { value: 180 };
   const outerActive = { value: 1 };
   const leftPaper = { value: 0 };
+  const leftBlurFloor = { value: 0 };
+  const rightBlurFloor = { value: 0 };
   const leftAngle = { value: 90 };
   const rightPaper = { value: 0 };
   const blurIntensity = { value: 2.6 };
@@ -449,6 +455,8 @@ export function mountCoordinatedPaperScene(
         shader.uniforms.uOuterScreen = { value: outer ? 1 : 0 };
         shader.uniforms.uOuterActive = outerActive;
         shader.uniforms.uLeftPaper = leftPaper;
+        shader.uniforms.uLeftBlurFloor = leftBlurFloor;
+        shader.uniforms.uRightBlurFloor = rightBlurFloor;
         shader.uniforms.uLeftAngle = leftAngle;
         shader.uniforms.uRightPaper = rightPaper;
         shader.uniforms.uBlurIntensity = blurIntensity;
@@ -486,6 +494,8 @@ export function mountCoordinatedPaperScene(
             uniform float uOuterScreen;
             uniform float uOuterActive;
             uniform float uLeftPaper;
+            uniform float uLeftBlurFloor;
+            uniform float uRightBlurFloor;
             uniform float uLeftAngle;
             uniform float uRightPaper;
             uniform float uBlurIntensity;
@@ -632,7 +642,10 @@ export function mountCoordinatedPaperScene(
                 // The backing image is coincident with the registered screen
                 // pose. Only the fold itself creates paper-to-image distance;
                 // do not inject an artificial recessed backdrop.
-                float effectiveGap = gap;
+                // Near rest the sheet-to-image gap shrinks toward zero, which
+                // would sharpen the offset content before the fold completes.
+                // Hold a minimum scattering distance until the last degrees.
+                float effectiveGap = max(gap, mix(uLeftBlurFloor, uRightBlurFloor, uOuterScreen));
                 vec3 scatterOrigin = vPaperWorld;
                 // Fade the blur in by its footprint on the image, in texels.
                 // A near-zero distance cutoff switched it on abruptly and drew
@@ -707,7 +720,7 @@ export function mountCoordinatedPaperScene(
                 // cone falls past the image onto the dark housing. Attenuate by
                 // the same radius that sets the blur, so shade and softness
                 // share one gradient instead of a painted edge profile.
-                float blurRadius = gap * scatter / max(abs(dot(ray, uPlaneNormal)), 0.1);
+                float blurRadius = effectiveGap * scatter / max(abs(dot(ray, uPlaneNormal)), 0.1);
                 float edgeEnabled = (uInspectionMode < 0.5 || uInspectionMode > 9.5) ? 1.0 : 0.0;
                 float lightLoss = 1.0 - exp(-3.5 * uEdgeDarkening * blurRadius);
                 baseColor *= 1.0 - edgeEnabled * lightLoss;
@@ -912,6 +925,10 @@ export function mountCoordinatedPaperScene(
     leftPaper.value = state.leftPaper;
     leftAngle.value = state.leftAngle;
     rightPaper.value = state.rightPaper;
+    // Minimum blur distance while a sheet is off its rest pose; it releases
+    // only in the final 2.5°, which the terminal clack crosses in milliseconds.
+    leftBlurFloor.value = BLUR_FLOOR * smoothstep(0, 2.5, state.leftAngle);
+    rightBlurFloor.value = BLUR_FLOOR * smoothstep(0, 2.5, state.rightAngle);
     if (foldCentringReady) {
       // Slide the view between the folded and fully-open centres in step with
       // the actual hinge angle (not elapsed time). This way the phone reaches
