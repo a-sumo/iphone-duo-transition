@@ -298,11 +298,12 @@ export default function CoordinatedPaperOpening({
         {error && <span className="tp-opening__error" role="alert">3D preview unavailable on this device.</span>}
       </div>
       <div className="tp-opening__transport">
-        <button type="button" onClick={() => settleFold(openOnClick)} disabled={error}
+        <button type="button" className="tp-opening__primary" onClick={() => settleFold(openOnClick)} disabled={error}
           aria-label={openOnClick ? "Open phone" : "Close phone"}>
           {openOnClick ? "Open" : "Close"}
         </button>
-      <div className="tp-opening__view-controls" role="group" aria-label="View controls">
+      <div className={`tp-opening__view-controls${moveView ? " is-orbit" : ""}`} role="group" aria-label="View controls">
+        <span className="tp-opening__segment-thumb" aria-hidden="true" />
         <button type="button" aria-pressed={!moveView}
           onClick={showFrontView} disabled={error}>
           Front
@@ -312,7 +313,7 @@ export default function CoordinatedPaperOpening({
           Orbit
         </button>
       </div>
-        <button ref={inspectButtonRef} type="button" aria-expanded={inspectorOpen} aria-controls={inspectorId}
+        <button ref={inspectButtonRef} type="button" className="tp-opening__secondary" aria-expanded={inspectorOpen} aria-controls={inspectorId}
           onClick={() => setInspectorOpen(!inspectorOpen)}>Inspect</button>
       </div>
       <aside id={inspectorId} className="tp-opening__inspector" aria-hidden={!inspectorOpen}
