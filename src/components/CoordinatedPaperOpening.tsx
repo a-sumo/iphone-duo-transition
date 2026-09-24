@@ -30,6 +30,9 @@ const DEFAULT_EDGE_DARKENING = 1.4;
 // Lingering at small angles shows the stencil offset before any blur appears.
 const CLACK_ZONE = 14;
 const FOLD_HINT_KEY = "duo-fold-hint-done";
+// An explicit choice from the inspector switch ("on" | "off") overrides the
+// automatic retirement after the first fold.
+const FOLD_HINT_PREF_KEY = "duo-fold-hint-pref";
 
 function angleAtTime(time: number) {
   const pose = stateAtTime(time);
@@ -67,6 +70,7 @@ export default function CoordinatedPaperOpening({
   // has no hover), until the first real fold retires it. The inspector has a
   // switch to turn it back on or off.
   const [hintDone, setHintDone] = useState(true);
+  const hintPref = useRef<"on" | "off" | null>(null);
   const [hintArmed, setHintArmed] = useState(false);
   const [nearPhone, setNearPhone] = useState(false);
   const nearFrame = useRef(0);
@@ -156,7 +160,11 @@ export default function CoordinatedPaperOpening({
   }, []);
 
   useEffect(() => {
-    try { setHintDone(localStorage.getItem(FOLD_HINT_KEY) === "1"); } catch { setHintDone(false); }
+    try {
+      const pref = localStorage.getItem(FOLD_HINT_PREF_KEY);
+      hintPref.current = pref === "on" || pref === "off" ? pref : null;
+      setHintDone(hintPref.current ? hintPref.current === "off" : localStorage.getItem(FOLD_HINT_KEY) === "1");
+    } catch { setHintDone(false); }
     if (window.matchMedia("(pointer: coarse)").matches) setNearPhone(true);
     const timer = window.setTimeout(() => setHintArmed(true), 1200);
     return () => window.clearTimeout(timer);
@@ -171,14 +179,17 @@ export default function CoordinatedPaperOpening({
     sceneRef.current?.setDragHint(showHint);
   }, [showHint]);
 
+  // Automatic: retire after the first fold, unless the reader chose manually.
   function markFoldHintDone() {
+    if (hintPref.current) return;
     setHintDone(true);
     try { localStorage.setItem(FOLD_HINT_KEY, "1"); } catch { /* storage unavailable */ }
   }
 
-  function enableFoldHint() {
-    setHintDone(false);
-    try { localStorage.removeItem(FOLD_HINT_KEY); } catch { /* storage unavailable */ }
+  function setFoldHintPreference(on: boolean) {
+    hintPref.current = on ? "on" : "off";
+    setHintDone(!on);
+    try { localStorage.setItem(FOLD_HINT_PREF_KEY, hintPref.current); } catch { /* storage unavailable */ }
   }
 
   // Near = within 60 px of the phone's projected bounds.
@@ -428,7 +439,7 @@ export default function CoordinatedPaperOpening({
         </label>
         <label className="tp-opening__switch">
           <input type="checkbox" role="switch" checked={!hintDone}
-            onChange={(event) => (event.target.checked ? enableFoldHint() : markFoldHintDone())} />
+            onChange={(event) => setFoldHintPreference(event.target.checked)} />
           <span>Drag hints</span>
         </label>
       </div>
