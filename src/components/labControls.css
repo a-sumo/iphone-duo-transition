@@ -1,0 +1,186 @@
+/* Shared control language for the lab simulators (tracing paper, iPhone Duo
+   transition, perception study). Compact 36px targets on fine pointers and
+   44px on touch; quick, physical feedback (fast colour change, slight
+   press-in) rather than slow fades. */
+.lab-btn,
+.lab-seg > button,
+.lab-field,
+.lab-select {
+  font: 500 13px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.lab-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 9px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease,
+    transform 160ms cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.lab-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.lab-btn:not(:disabled):active {
+  transform: scale(0.96);
+  transition-duration: 60ms;
+}
+.lab-btn:focus-visible,
+.lab-seg > button:focus-visible,
+.lab-select:focus-visible,
+.lab-field input:focus-visible {
+  outline: 2px solid #6482dc;
+  outline-offset: 3px;
+}
+
+.lab-btn--primary {
+  background: #1d1d1f;
+  color: #fff;
+}
+.lab-btn--secondary,
+.lab-select,
+.lab-field {
+  background: #fff;
+  color: #1d1d1f;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.lab-btn--secondary[aria-expanded="true"],
+.lab-btn--secondary[aria-pressed="true"] {
+  background: #1d1d1f;
+  color: #fff;
+  box-shadow: none;
+}
+@media (hover: hover) {
+  .lab-btn--primary:not(:disabled):hover,
+  .lab-btn--secondary[aria-expanded="true"]:not(:disabled):hover,
+  .lab-btn--secondary[aria-pressed="true"]:not(:disabled):hover {
+    background: #37373b;
+  }
+  .lab-btn--secondary:not([aria-expanded="true"]):not([aria-pressed="true"]):not(:disabled):hover,
+  .lab-select:hover {
+    background: #f7f7f9;
+  }
+  .lab-seg > button:not(:disabled):hover {
+    color: #1d1d1f;
+  }
+}
+
+/* Segmented switch: set --seg-count and --seg-index on the track. */
+.lab-seg {
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 3px;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.065);
+}
+.lab-seg__thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / var(--seg-count, 2));
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  transform: translateX(calc(100% * var(--seg-index, 0)));
+  transition: transform 220ms cubic-bezier(0.3, 0.7, 0.2, 1), opacity 120ms ease;
+}
+.lab-seg--none .lab-seg__thumb {
+  opacity: 0;
+}
+.lab-seg > button {
+  appearance: none;
+  position: relative;
+  min-height: 30px;
+  min-width: 64px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b6f78;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 120ms ease, transform 160ms cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.lab-seg > button[aria-pressed="true"] {
+  color: #1d1d1f;
+}
+.lab-seg > button:not(:disabled):active {
+  transform: scale(0.94);
+  transition-duration: 60ms;
+}
+.lab-seg > button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Labelled slider in a pill. */
+.lab-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 9px;
+  color: #3a3d44;
+  font-size: 12px;
+}
+.lab-field input[type="range"] {
+  width: 120px;
+  margin: 0;
+  accent-color: #1d1d1f;
+  cursor: pointer;
+}
+.lab-field output {
+  min-width: 42px;
+  color: #6b6f78;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.lab-select {
+  appearance: none;
+  min-height: 36px;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+@media (pointer: coarse) {
+  .lab-btn,
+  .lab-field,
+  .lab-select {
+    min-height: 44px;
+  }
+  .lab-seg > button {
+    min-height: 38px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lab-btn,
+  .lab-seg > button,
+  .lab-seg__thumb,
+  .lab-select {
+    transition: none;
+  }
+  .lab-btn:not(:disabled):active,
+  .lab-seg > button:not(:disabled):active {
+    transform: none;
+  }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 const screenImageUrl = `${import.meta.env.BASE_URL}assets/tracing-paper/iphone-duo-clean-background.jpeg`;
 const foldedScreenImageUrl = `${import.meta.env.BASE_URL}assets/tracing-paper/iphone-duo-folded-cover.png`;
 import {
@@ -8,6 +8,7 @@ import {
   type CoordinatedPaperScene,
   type ScreenSurface,
 } from "./coordinatedDisplayScene";
+import "./labControls.css";
 import "./CoordinatedPaperOpening.css";
 
 const steps = [
@@ -28,6 +29,7 @@ const DEFAULT_EDGE_DARKENING = 1.4;
 // magnetic detent: it accelerates into rest and lands with a short cushion.
 // Lingering at small angles shows the stencil offset before any blur appears.
 const CLACK_ZONE = 14;
+const FOLD_HINT_KEY = "duo-fold-hint-done";
 
 function angleAtTime(time: number) {
   const pose = stateAtTime(time);
@@ -60,6 +62,13 @@ export default function CoordinatedPaperOpening({
   const [time, setTime] = useState(0);
   const [foldDestination, setFoldDestination] = useState<boolean | null>(null);
   const [error, setError] = useState(false);
+  // Drag hint: a flowing dot texture on the moving screen (drawn by the scene).
+  // Shown at rest until the first real fold (remembered), and replayed
+  // whenever the pointer hovers the phone.
+  const [hintDone, setHintDone] = useState(true);
+  const [hintArmed, setHintArmed] = useState(false);
+  const [hoveringPhone, setHoveringPhone] = useState(false);
+  const [grabbing, setGrabbing] = useState(false);
   const [surface, setSurface] = useState<ScreenSurface>("edge-darkening");
   const [triangles, setTriangles] = useState(false);
   const [moveView, setMoveView] = useState(true);
@@ -144,6 +153,25 @@ export default function CoordinatedPaperOpening({
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
+  useEffect(() => {
+    try { setHintDone(localStorage.getItem(FOLD_HINT_KEY) === "1"); } catch { setHintDone(false); }
+    const timer = window.setTimeout(() => setHintArmed(true), 1200);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const atRest = time <= 0 || time >= SEQUENCE_DURATION;
+  const showHint = hintArmed && atRest && !moveView && !grabbing && !error &&
+    foldDestination === null && (!hintDone || hoveringPhone);
+
+  useEffect(() => {
+    sceneRef.current?.setDragHint(showHint);
+  }, [showHint]);
+
+  function markFoldHintDone() {
+    setHintDone(true);
+    try { localStorage.setItem(FOLD_HINT_KEY, "1"); } catch { /* storage unavailable */ }
+  }
+
   function showTime(nextTime: number) {
     const clamped = Math.min(SEQUENCE_DURATION, Math.max(0, nextTime));
     timeRef.current = clamped;
@@ -192,6 +220,7 @@ export default function CoordinatedPaperOpening({
     stop();
     cancelAnimationFrame(foldFrame.current);
     foldDrag.current = { id: event.pointerId, time: timeRef.current, grabbed, direction: 0, lastMotion: 0 };
+    setGrabbing(grabbed);
     scene.setOrbitEnabled(false);
     event.currentTarget.setPointerCapture(event.pointerId);
     event.stopPropagation();
@@ -218,6 +247,8 @@ export default function CoordinatedPaperOpening({
     const drag = foldDrag.current;
     if (drag?.id !== event.pointerId) return;
     foldDrag.current = null;
+    setGrabbing(false);
+    if (drag.grabbed && Math.abs(timeRef.current - drag.time) > 0.05) markFoldHintDone();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     sceneRef.current?.endGrab();
     event.currentTarget.style.cursor = "";
@@ -289,6 +320,11 @@ export default function CoordinatedPaperOpening({
       <div className={`tp-opening__stage${moveView ? " tp-opening__stage--view" : ""}`} ref={stageRef}
         onPointerDownCapture={foldStart} onPointerMoveCapture={foldMove}
         onPointerUpCapture={foldEnd} onPointerCancelCapture={foldEnd} onLostPointerCapture={foldEnd}
+        onPointerMove={(event) => {
+          if (event.pointerType !== "mouse" || foldDrag.current) return;
+          setHoveringPhone(!!sceneRef.current?.hitsPhoneSilhouette(event.clientX, event.clientY));
+        }}
+        onPointerLeave={() => setHoveringPhone(false)}
         tabIndex={0} aria-label="Grab the moving screen and drag it around its hinge. Drag background to orbit. Arrow keys adjust fold."
         onKeyDown={(event) => {
           if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -298,12 +334,13 @@ export default function CoordinatedPaperOpening({
         {error && <span className="tp-opening__error" role="alert">3D preview unavailable on this device.</span>}
       </div>
       <div className="tp-opening__transport">
-        <button type="button" className="tp-opening__primary" onClick={() => settleFold(openOnClick)} disabled={error}
+        <button type="button" className="lab-btn lab-btn--primary tp-opening__primary" onClick={() => settleFold(openOnClick)} disabled={error}
           aria-label={openOnClick ? "Open phone" : "Close phone"}>
           {openOnClick ? "Open" : "Close"}
         </button>
-      <div className={`tp-opening__view-controls${moveView ? " is-orbit" : ""}`} role="group" aria-label="View controls">
-        <span className="tp-opening__segment-thumb" aria-hidden="true" />
+      <div className="lab-seg" role="group" aria-label="View controls"
+        style={{ "--seg-count": 2, "--seg-index": moveView ? 1 : 0 } as CSSProperties}>
+        <span className="lab-seg__thumb" aria-hidden="true" />
         <button type="button" aria-pressed={!moveView}
           onClick={showFrontView} disabled={error}>
           Front
@@ -313,7 +350,7 @@ export default function CoordinatedPaperOpening({
           Orbit
         </button>
       </div>
-        <button ref={inspectButtonRef} type="button" className="tp-opening__secondary" aria-expanded={inspectorOpen} aria-controls={inspectorId}
+        <button ref={inspectButtonRef} type="button" className="lab-btn lab-btn--secondary" aria-expanded={inspectorOpen} aria-controls={inspectorId}
           onClick={() => setInspectorOpen(!inspectorOpen)}>Inspect</button>
       </div>
       <aside id={inspectorId} className="tp-opening__inspector" aria-hidden={!inspectorOpen}

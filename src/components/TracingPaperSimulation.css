@@ -161,62 +161,8 @@
   border-top: 1px solid rgba(100, 130, 220, 0.18);
 }
 
-.tp-sim-controls button {
-  min-height: 36px;
-  padding: 0 13px;
-  border: 1px solid rgba(74, 105, 190, 0.34);
-  border-radius: 7px;
-  background: #fff;
-  color: #3e5eb8;
-  font:
-    600 10px "Roboto Mono",
-    ui-monospace,
-    monospace;
-  cursor: pointer;
-}
-
-.tp-sim-controls button:hover {
-  background: #f3f6fd;
-}
-
-.tp-sim-controls button[aria-pressed="true"] {
-  background: #e9efff;
-  border-color: #6482dc;
-}
-
-.tp-sim-controls button:focus-visible,
-.tp-sim-controls input:focus-visible {
-  outline: 2px solid #6482dc;
-  outline-offset: 2px;
-}
-
-.tp-sim-controls label {
-  display: grid;
-  grid-template-columns: auto minmax(85px, 140px) 37px;
-  align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 0 10px;
-  border: 1px solid rgba(74, 105, 190, 0.34);
-  border-radius: 7px;
-  color: #3e5eb8;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-}
-
-.tp-sim-controls input {
-  width: 100%;
-  min-width: 0;
-  margin: 0;
-  accent-color: #6482dc;
+.tp-sim-controls .lab-field input {
   cursor: ew-resize;
-}
-
-.tp-sim-controls output {
-  color: #3e5eb8;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
 }
 
 .tp-sim-footer {
@@ -246,14 +192,16 @@
     height: 460px;
   }
   .tp-sim-controls {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 7px;
+    gap: 8px;
     padding: 9px;
   }
-  .tp-sim-controls label {
-    grid-column: 1 / -1;
-    grid-template-columns: 62px minmax(0, 1fr) 34px;
+  .tp-sim-controls .lab-field {
+    flex: 1 1 100%;
+  }
+  .tp-sim-controls .lab-field input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
   }
   .tp-sim-footer {
     gap: 10px;

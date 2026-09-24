@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 const lakeOfZugImageUrl = `${import.meta.env.BASE_URL}assets/tracing-paper/lake-of-zug-turner-1843.jpeg`;
 import {
   mountTracingPaperScene,
   type TracingPaperScene,
 } from "./tracingPaperScene";
+import "./labControls.css";
 import "./TracingPaperSimulation.css";
 
 type TracingPaperSimulationProps = {
@@ -87,8 +88,8 @@ export default function TracingPaperSimulation({
         <span>1843</span>
       </figcaption>
       <div className="tp-sim-controls">
-        <label>
-          <span>RAY SPREAD</span>
+        <label className="lab-field">
+          <span>Ray spread</span>
           <input
             type="range"
             min="0"
@@ -99,16 +100,22 @@ export default function TracingPaperSimulation({
           />
           <output>{raySpread}%</output>
         </label>
-        <button
-          className="tp-sim-view"
-          type="button"
-          aria-pressed={moveView}
-          onClick={() => updateMoveView(!moveView)}
+        <div
+          className="lab-seg"
+          role="group"
+          aria-label="Drag mode"
+          style={{ "--seg-count": 2, "--seg-index": moveView ? 1 : 0 } as CSSProperties}
         >
-          {moveView ? "Fold paper" : "Move view"}
-        </button>
+          <span className="lab-seg__thumb" aria-hidden="true" />
+          <button type="button" aria-pressed={!moveView} onClick={() => updateMoveView(false)}>
+            Fold
+          </button>
+          <button type="button" aria-pressed={moveView} onClick={() => updateMoveView(true)}>
+            Move view
+          </button>
+        </div>
         <button
-          className="tp-sim-top"
+          className="lab-btn lab-btn--secondary"
           type="button"
           onClick={() => sceneRef.current?.resetTopView()}
           aria-label="Reset to top-down view"
@@ -117,7 +124,7 @@ export default function TracingPaperSimulation({
         </button>
         {!standalone && (
           <button
-            className="tp-sim-fullscreen"
+            className="lab-btn lab-btn--secondary"
             type="button"
             aria-pressed={fullscreen}
             onClick={toggleFullscreen}

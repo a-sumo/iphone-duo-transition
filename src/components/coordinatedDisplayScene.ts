@@ -37,6 +37,8 @@ export type CoordinatedPaperScene = {
   hitsPhoneSilhouette: (clientX: number, clientY: number) => boolean;
   moveGrab: (clientX: number, clientY: number) => number | null;
   endGrab: () => void;
+  /** Show or hide the flowing dot hint on the moving screen. */
+  setDragHint: (active: boolean) => void;
   setOrbitEnabled: (enabled: boolean) => void;
   setBlurIntensity: (intensity: number) => void;
   setTransitionLength: (length: number) => void;
@@ -338,6 +340,12 @@ export function mountCoordinatedPaperScene(
     side: THREE.DoubleSide,
   });
   const inspectionUniform = { value: 0 };
+  // Drag hint: a dot texture on the moving screen, lit by bands that flow
+  // from its free edge toward the hinge (the direction a drag folds it).
+  const dragHint = { value: 0 };
+  const dragHintTime = { value: 0 };
+  const dragHintCover = { value: 1 };
+  const dragHintStatic = { value: 0 };
   const hingeAngle = { value: 180 };
   const outerActive = { value: 1 };
   const leftPaper = { value: 0 };
@@ -463,6 +471,10 @@ export function mountCoordinatedPaperScene(
         shader.uniforms.uTransitionLength = transitionLength;
         shader.uniforms.uEdgeDarkening = edgeDarkening;
         shader.uniforms.uInspectionMode = inspectionUniform;
+        shader.uniforms.uDragHint = dragHint;
+        shader.uniforms.uDragHintTime = dragHintTime;
+        shader.uniforms.uDragHintCover = dragHintCover;
+        shader.uniforms.uDragHintStatic = dragHintStatic;
         shader.uniforms.uHingeAngle = hingeAngle;
         shader.uniforms.uViewToEye = viewToEye;
         shader.uniforms.uLeafFacing = leafFacing;
@@ -501,6 +513,10 @@ export function mountCoordinatedPaperScene(
             uniform float uBlurIntensity;
             uniform float uTransitionLength;
             uniform float uEdgeDarkening;
+            uniform float uDragHint;
+            uniform float uDragHintTime;
+            uniform float uDragHintCover;
+            uniform float uDragHintStatic;
             uniform bool uUseStencil;
             uniform bool uCaptureMask;
             uniform float uUseShading;
@@ -738,6 +754,26 @@ export function mountCoordinatedPaperScene(
                 vec2 attachedUv = mix(screenUv, coverImageUv(screenUv), uOuterScreen);
                 diffuseColor.rgb = sampleDisplay(attachedUv);
               }
+              if (uDragHint > 0.001 && uInspectionMode < 0.5) {
+                // Only the sheet that moves: the cover when closed, the inner
+                // leaf (u < .5) when open. "along" runs free edge -> hinge.
+                float onCover = uOuterScreen * uDragHintCover;
+                float onLeaf = (1.0 - uOuterScreen) * (1.0 - uDragHintCover) * step(screenUv.x, 0.5);
+                float along = mix(screenUv.x / 0.5, 1.0 - screenUv.x, uOuterScreen);
+                // Grid in physical units so the dots stay round on both screens.
+                vec2 grid = vec2(screenUv.x * mix(4.3, 2.15, uOuterScreen), screenUv.y * 3.09);
+                const float spacing = 0.13;
+                float dotDistance = length(fract(grid / spacing) - 0.5) * spacing;
+                float aa = max(fwidth(dotDistance), 1e-4);
+                float dotMask = 1.0 - smoothstep(0.011 - aa, 0.011 + aa, dotDistance);
+                // Soft bands travelling toward the hinge, fading at both ends.
+                float flow = pow(0.5 + 0.5 * sin(6.2831853 * (along * 1.25 - uDragHintTime * 0.55)), 6.0);
+                flow = mix(flow, 0.45, uDragHintStatic);
+                float envelope = smoothstep(0.0, 0.12, along) * (1.0 - smoothstep(0.75, 1.0, along));
+                float shimmer = 0.6 + 0.4 * sin(grid.y * 9.0 + uDragHintTime * 1.7 + grid.x * 3.0);
+                diffuseColor.rgb += vec3(dotMask * flow * envelope * shimmer * 0.6 *
+                  uDragHint * (onCover + onLeaf));
+              }
             }
             diffuseColor.a = opacity;
           `);
@@ -830,6 +866,28 @@ export function mountCoordinatedPaperScene(
     setTime(initialTime);
     render();
   });
+
+  let dragHintTarget = 0;
+  let dragHintFrame = 0;
+  let dragHintLast = 0;
+  let dragHintStart = 0;
+  function dragHintTick(now: number) {
+    const dt = Math.min(0.1, (now - dragHintLast) / 1000);
+    dragHintLast = now;
+    dragHint.value += (dragHintTarget - dragHint.value) * (1 - Math.exp(-dt / 0.25));
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    dragHintStatic.value = still ? 1 : 0;
+    if (!still) dragHintTime.value = (now - dragHintStart) / 1000;
+    dragHintCover.value = hingeAngle.value > 90 ? 1 : 0;
+    if (dragHintTarget === 0 && dragHint.value < 0.002) {
+      dragHint.value = 0;
+      dragHintFrame = 0;
+      render();
+      return;
+    }
+    render();
+    dragHintFrame = requestAnimationFrame(dragHintTick);
+  }
 
   function render() {
     if (disposed) return;
@@ -986,6 +1044,9 @@ export function mountCoordinatedPaperScene(
       const mask = new Uint16Array(size * size * 4);
       const black = new THREE.MeshBasicMaterial({ color: 0, toneMapped: false });
       const changed: Array<[THREE.Mesh, THREE.Material | THREE.Material[]]> = [];
+      // Measure the display itself, never the drag hint drawn on it.
+      const hintLevel = dragHint.value;
+      dragHint.value = 0;
       try {
         renderer.setRenderTarget(captureTarget);
         renderer.render(scene, camera);
@@ -1004,6 +1065,7 @@ export function mountCoordinatedPaperScene(
         renderer.setRenderTarget(null);
         renderer.readRenderTargetPixels(captureTarget, 0, 0, size, size, mask);
       } finally {
+        dragHint.value = hintLevel;
         captureMask.value = false;
         changed.forEach(([object, material]) => { object.material = material; });
         black.dispose();
@@ -1155,6 +1217,14 @@ export function mountCoordinatedPaperScene(
       return THREE.MathUtils.lerp(grabPath[i].time, grabPath[i + 1].time, grabIndex - i);
     },
     endGrab() { grabPath = null; controls.enabled = moveView; },
+    setDragHint(active) {
+      dragHintTarget = active ? 1 : 0;
+      if (active && dragHint.value < 0.002) dragHintStart = performance.now();
+      if (!dragHintFrame) {
+        dragHintLast = performance.now();
+        dragHintFrame = requestAnimationFrame(dragHintTick);
+      }
+    },
     setOrbitEnabled(enabled) {
       controls.enabled = enabled && moveView;
     },
@@ -1256,6 +1326,7 @@ export function mountCoordinatedPaperScene(
     },
     dispose() {
       disposed = true;
+      cancelAnimationFrame(dragHintFrame);
       resizeObserver.disconnect();
       for (const { mesh, material } of cameraGlass) mesh.material = material;
       for (const visual of imagePlaneVisuals) {
