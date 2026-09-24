@@ -62,7 +62,7 @@ export default function CoordinatedPaperOpening({
   const [time, setTime] = useState(0);
   const [foldDestination, setFoldDestination] = useState<boolean | null>(null);
   const [error, setError] = useState(false);
-  // Drag hint: a flowing dot texture on the moving screen (drawn by the scene).
+  // Drag hint: billboarded dots on the fold arc (drawn by the scene).
   // Shown at rest until the first real fold (remembered), and replayed
   // whenever the pointer hovers the phone.
   const [hintDone, setHintDone] = useState(true);
@@ -159,8 +159,9 @@ export default function CoordinatedPaperOpening({
     return () => window.clearTimeout(timer);
   }, []);
 
-  const atRest = time <= 0 || time >= SEQUENCE_DURATION;
-  const showHint = hintArmed && atRest && !moveView && !grabbing && !error &&
+  // Any idle pose: the arc starts at the leaf's current angle, so the hint
+  // also reads when the phone is partly open.
+  const showHint = hintArmed && !grabbing && !error &&
     foldDestination === null && (!hintDone || hoveringPhone);
 
   useEffect(() => {

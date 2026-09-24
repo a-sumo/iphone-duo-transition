@@ -340,12 +340,14 @@ export function mountCoordinatedPaperScene(
     side: THREE.DoubleSide,
   });
   const inspectionUniform = { value: 0 };
-  // Drag hint: a dot texture on the moving screen, lit by bands that flow
-  // from its free edge toward the hinge (the direction a drag folds it).
+  // Drag hint: billboarded dots on the arc the leaf's free edge sweeps around
+  // the hinge, lit by bands flowing from the current angle toward the other
+  // rest pose (the direction a drag folds it).
   const dragHint = { value: 0 };
   const dragHintTime = { value: 0 };
-  const dragHintCover = { value: 1 };
   const dragHintStatic = { value: 0 };
+  const dragHintCurrent = { value: 180 };
+  const dragHintRest = { value: 0 };
   const hingeAngle = { value: 180 };
   const outerActive = { value: 1 };
   const leftPaper = { value: 0 };
@@ -385,6 +387,29 @@ export function mountCoordinatedPaperScene(
         border.roughness = 1;
         border.metalness = 0;
         border.envMapIntensity = 0.12;
+      }
+    });
+    // Star White per Apple's product imagery: grade 5 titanium polished to a
+    // bright, near-white mirror finish, with a frosted white back.
+    const starWhite: Record<string, Partial<{ color: [number, number, number]; metalness: number; roughness: number }>> = {
+      C_StarWhite_Side: { color: [0.93, 0.93, 0.92], metalness: 1, roughness: 0.07 },
+      C_SW_Side_Matte: { color: [0.9, 0.9, 0.89], metalness: 1, roughness: 0.16 },
+      C_SW_Backpanel_Inner: { color: [0.92, 0.92, 0.91], metalness: 1, roughness: 0.12 },
+      C_StarWhite_Backpanel: { color: [0.98, 0.98, 0.97], metalness: 0, roughness: 0.5 },
+      C_SW_BackCamSpeaker: { color: [0.94, 0.94, 0.93], metalness: 0, roughness: 0.5 },
+      C_SW_Apple: { color: [0.9, 0.9, 0.89], metalness: 0, roughness: 0.12 },
+      C_SW_ButtonCap: { color: [0.92, 0.92, 0.91], metalness: 1, roughness: 0.12 },
+      C_SW_Antenna: { color: [0.82, 0.82, 0.8], metalness: 0, roughness: 0.45 },
+    };
+    phone.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        const finish = starWhite[material.name];
+        if (!finish) continue;
+        const standard = material as THREE.MeshStandardMaterial;
+        if (finish.color) standard.color.setRGB(...finish.color, THREE.SRGBColorSpace);
+        if (finish.metalness !== undefined) standard.metalness = finish.metalness;
+        if (finish.roughness !== undefined) standard.roughness = finish.roughness;
       }
     });
     // The Star White frame is one metal mesh per half, but on the device only
@@ -471,10 +496,6 @@ export function mountCoordinatedPaperScene(
         shader.uniforms.uTransitionLength = transitionLength;
         shader.uniforms.uEdgeDarkening = edgeDarkening;
         shader.uniforms.uInspectionMode = inspectionUniform;
-        shader.uniforms.uDragHint = dragHint;
-        shader.uniforms.uDragHintTime = dragHintTime;
-        shader.uniforms.uDragHintCover = dragHintCover;
-        shader.uniforms.uDragHintStatic = dragHintStatic;
         shader.uniforms.uHingeAngle = hingeAngle;
         shader.uniforms.uViewToEye = viewToEye;
         shader.uniforms.uLeafFacing = leafFacing;
@@ -513,10 +534,6 @@ export function mountCoordinatedPaperScene(
             uniform float uBlurIntensity;
             uniform float uTransitionLength;
             uniform float uEdgeDarkening;
-            uniform float uDragHint;
-            uniform float uDragHintTime;
-            uniform float uDragHintCover;
-            uniform float uDragHintStatic;
             uniform bool uUseStencil;
             uniform bool uCaptureMask;
             uniform float uUseShading;
@@ -754,26 +771,6 @@ export function mountCoordinatedPaperScene(
                 vec2 attachedUv = mix(screenUv, coverImageUv(screenUv), uOuterScreen);
                 diffuseColor.rgb = sampleDisplay(attachedUv);
               }
-              if (uDragHint > 0.001 && uInspectionMode < 0.5) {
-                // Only the sheet that moves: the cover when closed, the inner
-                // leaf (u < .5) when open. "along" runs free edge -> hinge.
-                float onCover = uOuterScreen * uDragHintCover;
-                float onLeaf = (1.0 - uOuterScreen) * (1.0 - uDragHintCover) * step(screenUv.x, 0.5);
-                float along = mix(screenUv.x / 0.5, 1.0 - screenUv.x, uOuterScreen);
-                // Grid in physical units so the dots stay round on both screens.
-                vec2 grid = vec2(screenUv.x * mix(4.3, 2.15, uOuterScreen), screenUv.y * 3.09);
-                const float spacing = 0.13;
-                float dotDistance = length(fract(grid / spacing) - 0.5) * spacing;
-                float aa = max(fwidth(dotDistance), 1e-4);
-                float dotMask = 1.0 - smoothstep(0.011 - aa, 0.011 + aa, dotDistance);
-                // Soft bands travelling toward the hinge, fading at both ends.
-                float flow = pow(0.5 + 0.5 * sin(6.2831853 * (along * 1.25 - uDragHintTime * 0.55)), 6.0);
-                flow = mix(flow, 0.45, uDragHintStatic);
-                float envelope = smoothstep(0.0, 0.12, along) * (1.0 - smoothstep(0.75, 1.0, along));
-                float shimmer = 0.6 + 0.4 * sin(grid.y * 9.0 + uDragHintTime * 1.7 + grid.x * 3.0);
-                diffuseColor.rgb += vec3(dotMask * flow * envelope * shimmer * 0.6 *
-                  uDragHint * (onCover + onLeaf));
-              }
             }
             diffuseColor.a = opacity;
           `);
@@ -851,6 +848,98 @@ export function mountCoordinatedPaperScene(
       }
     }
     scene.add(phone);
+    // Drag-hint arc: sweep the leaf through the fold and record its free edge
+    // (inner display, u = 0) plus a few arcs closer to the hinge, giving a
+    // curved sheet of dots along the path the screen travels.
+    const innerDisplay = displayMeshes.find((mesh) => mesh.name === "Object_106");
+    if (innerDisplay) {
+      const uv = innerDisplay.geometry.getAttribute("uv");
+      const nearest = (u: number, v: number) => {
+        let best = 0, score = Infinity;
+        for (let i = 0; i < uv.count; i++) {
+          const d = Math.abs(uv.getX(i) - u) * 4 + Math.abs(uv.getY(i) - v);
+          if (d < score) { score = d; best = i; }
+        }
+        return best;
+      };
+      const rows = Array.from({ length: 15 }, (_, r) => 0.06 + (r * 0.88) / 14)
+        .map((v) => ({ edge: nearest(0, v), hinge: nearest(0.5, v) }));
+      const fractions = [1, 0.9, 0.8, 0.7];
+      const timeForAngle = (angle: number) => {
+        let low = 0, high = SEQUENCE_DURATION;
+        for (let i = 0; i < 24; i++) {
+          const mid = (low + high) / 2;
+          const pose = stateAtTime(mid);
+          if (90 + pose.leftAngle - pose.rightAngle > angle) low = mid;
+          else high = mid;
+        }
+        return (low + high) / 2;
+      };
+      const positions: number[] = [];
+      const angles: number[] = [];
+      const radii: number[] = [];
+      const edgePoint = new THREE.Vector3();
+      const hingePoint = new THREE.Vector3();
+      for (let step = 0; step <= 60; step++) {
+        setTime(timeForAngle(step * 3));
+        phone.updateMatrixWorld(true);
+        if (innerDisplay instanceof THREE.SkinnedMesh) innerDisplay.skeleton.update();
+        for (const { edge, hinge } of rows) {
+          innerDisplay.localToWorld(innerDisplay.getVertexPosition(edge, edgePoint));
+          innerDisplay.localToWorld(innerDisplay.getVertexPosition(hinge, hingePoint));
+          for (const fraction of fractions) {
+            const point = hingePoint.clone().lerp(edgePoint, fraction);
+            positions.push(point.x, point.y, point.z);
+            angles.push(hingeAngle.value);
+            radii.push(fraction);
+          }
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute("aAngle", new THREE.Float32BufferAttribute(angles, 1));
+      geometry.setAttribute("aRadius", new THREE.Float32BufferAttribute(radii, 1));
+      dragHintPoints = new THREE.Points(geometry, new THREE.ShaderMaterial({
+        uniforms: {
+          uHint: dragHint,
+          uTime: dragHintTime,
+          uStatic: dragHintStatic,
+          uCurrent: dragHintCurrent,
+          uTarget: dragHintRest,
+          uSize: { value: 5 * renderer.getPixelRatio() },
+        },
+        vertexShader: `
+          attribute float aAngle;
+          attribute float aRadius;
+          uniform float uHint, uTime, uStatic, uCurrent, uTarget, uSize;
+          varying float vAlpha;
+          void main() {
+            // 0 at the leaf's current angle, 1 at the rest pose it heads to.
+            float span = uCurrent - uTarget;
+            float s = abs(span) < 0.001 ? -1.0 : (uCurrent - aAngle) / span;
+            float inPath = step(0.0, s) * step(s, 1.0);
+            float band = pow(0.5 + 0.5 * sin(6.2831853 * (s * 2.2 - uTime * 0.6 + aRadius * 0.6)), 6.0);
+            band = mix(band, 0.45, uStatic);
+            float envelope = smoothstep(0.0, 0.06, s) * (1.0 - smoothstep(0.8, 1.0, s));
+            vAlpha = uHint * inPath * band * envelope * mix(0.45, 1.0, (aRadius - 0.7) / 0.3);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            gl_PointSize = uSize;
+          }`,
+        fragmentShader: `
+          varying float vAlpha;
+          void main() {
+            float alpha = smoothstep(0.5, 0.3, length(gl_PointCoord - 0.5)) * vAlpha;
+            if (alpha < 0.004) discard;
+            gl_FragColor = vec4(vec3(1.0), alpha * 0.9);
+          }`,
+        transparent: true,
+        depthWrite: false,
+      }));
+      dragHintPoints.frustumCulled = false;
+      dragHintPoints.renderOrder = 30;
+      dragHintPoints.visible = false;
+      scene.add(dragHintPoints);
+    }
     // Sample the phone's horizontal centre AND the hinge angle at the folded and
     // fully-open poses. The slide is then keyed to the actual hinge angle (not
     // elapsed time), so the view reaches its final position exactly as the fold
@@ -868,6 +957,7 @@ export function mountCoordinatedPaperScene(
   });
 
   let dragHintTarget = 0;
+  let dragHintPoints: THREE.Points | null = null;
   let dragHintFrame = 0;
   let dragHintLast = 0;
   let dragHintStart = 0;
@@ -878,10 +968,13 @@ export function mountCoordinatedPaperScene(
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     dragHintStatic.value = still ? 1 : 0;
     if (!still) dragHintTime.value = (now - dragHintStart) / 1000;
-    dragHintCover.value = hingeAngle.value > 90 ? 1 : 0;
+    dragHintCurrent.value = hingeAngle.value;
+    dragHintRest.value = hingeAngle.value > 90 ? 0 : 180;
+    if (dragHintPoints) dragHintPoints.visible = dragHint.value > 0.002 && inspectionUniform.value === 0;
     if (dragHintTarget === 0 && dragHint.value < 0.002) {
       dragHint.value = 0;
       dragHintFrame = 0;
+      if (dragHintPoints) dragHintPoints.visible = false;
       render();
       return;
     }
@@ -1047,6 +1140,8 @@ export function mountCoordinatedPaperScene(
       // Measure the display itself, never the drag hint drawn on it.
       const hintLevel = dragHint.value;
       dragHint.value = 0;
+      const hintVisible = dragHintPoints?.visible ?? false;
+      if (dragHintPoints) dragHintPoints.visible = false;
       try {
         renderer.setRenderTarget(captureTarget);
         renderer.render(scene, camera);
@@ -1066,6 +1161,7 @@ export function mountCoordinatedPaperScene(
         renderer.readRenderTargetPixels(captureTarget, 0, 0, size, size, mask);
       } finally {
         dragHint.value = hintLevel;
+        if (dragHintPoints) dragHintPoints.visible = hintVisible;
         captureMask.value = false;
         changed.forEach(([object, material]) => { object.material = material; });
         black.dispose();
