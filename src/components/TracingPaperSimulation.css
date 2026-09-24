@@ -5,7 +5,7 @@
   margin: 40px 0 72px 50%;
   transform: translateX(-50%);
   border: 1px solid rgba(100, 130, 220, 0.24);
-  background: #fff;
+  background: #ececee;
   box-shadow: 0 18px 60px rgba(40, 39, 40, 0.08);
   color: #282728;
   font-family: "Roboto Mono", ui-monospace, monospace;
@@ -28,7 +28,7 @@
 }
 
 .tp-sim:fullscreen::backdrop {
-  background: #fff;
+  background: #ececee;
 }
 
 .tp-sim:fullscreen .tp-sim-heading {
@@ -103,7 +103,7 @@
   position: relative;
   height: clamp(440px, 60vw, 650px);
   overflow: hidden;
-  background: #fff;
+  background: #ececee;
   cursor: grab;
   touch-action: none;
 }

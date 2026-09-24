@@ -21,9 +21,28 @@ const steps = [
   { number: 8, surface: "edge-darkening", label: "Edge darkening", triangles: false },
 ] as const;
 
-const DEFAULT_BLUR_INTENSITY = 1.6;
+const DEFAULT_BLUR_INTENSITY = 2.6;
 const DEFAULT_TRANSITION_LENGTH = 0.75;
-const DEFAULT_EDGE_DARKENING = 1;
+const DEFAULT_EDGE_DARKENING = 1.4;
+// Within this many degrees of open or closed, the leaf is pulled home like a
+// magnetic detent: it accelerates into rest and lands with a short cushion.
+// Lingering at small angles shows the stencil offset before any blur appears.
+const CLACK_ZONE = 14;
+
+function angleAtTime(time: number) {
+  const pose = stateAtTime(time);
+  return 90 + pose.leftAngle - pose.rightAngle;
+}
+
+function timeAtAngle(angle: number) {
+  let low = 0, high = SEQUENCE_DURATION;
+  for (let i = 0; i < 24; i++) {
+    const mid = (low + high) / 2;
+    if (angleAtTime(mid) > angle) low = mid;
+    else high = mid;
+  }
+  return (low + high) / 2;
+}
 
 type CoordinatedPaperOpeningProps = {
   standalone?: boolean;
@@ -37,6 +56,7 @@ export default function CoordinatedPaperOpening({
   const timeRef = useRef(0);
   const foldDrag = useRef<{ id: number; time: number; grabbed: boolean; direction: number; lastMotion: number } | null>(null);
   const foldFrame = useRef(0);
+  const clacking = useRef<boolean | null>(null);
   const [time, setTime] = useState(0);
   const [foldDestination, setFoldDestination] = useState<boolean | null>(null);
   const [error, setError] = useState(false);
@@ -77,6 +97,53 @@ export default function CoordinatedPaperOpening({
   }, []);
 
 
+  // When embedded in the scroll-driven article simulator, the parent maps its
+  // pinned-scroll progress (0 → 1) onto the fold timeline (folded → open).
+  // Manual dragging always wins; scroll only drives the pose when idle.
+  useEffect(() => {
+    if (window.parent === window) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type !== "duo-scroll-progress") return;
+      if (foldDrag.current) return;
+      const progress = Math.min(1, Math.max(0, Number(event.data.progress) || 0));
+      const target = progress * SEQUENCE_DURATION;
+      // Scroll into a detent: clack home and hold there until the reader
+      // scrolls back out of the zone.
+      const targetAngle = angleAtTime(target);
+      const detent = targetAngle <= CLACK_ZONE ? true : targetAngle >= 180 - CLACK_ZONE ? false : null;
+      if (detent !== null) {
+        const current = angleAtTime(timeRef.current);
+        const home = detent ? current <= 0.01 : current >= 179.99;
+        if (home || clacking.current === detent) return;
+        clack(detent);
+        return;
+      }
+      cancelAnimationFrame(foldFrame.current);
+      clacking.current = null;
+      setFoldDestination(null);
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        showTime(target);
+        return;
+      }
+      // Chase the scroll-mapped pose instead of jumping to it, so a phone the
+      // reader left at another angle eases back onto the scroll timeline.
+      // Frame-rate independent exponential smoothing (time constant ~140 ms).
+      let last = performance.now();
+      const chase = (now: number) => {
+        const dt = Math.min(0.1, (now - last) / 1000);
+        last = now;
+        const delta = target - timeRef.current;
+        if (Math.abs(delta) < 0.002) { showTime(target); return; }
+        showTime(timeRef.current + delta * (1 - Math.exp(-dt / 0.14)));
+        foldFrame.current = requestAnimationFrame(chase);
+      };
+      foldFrame.current = requestAnimationFrame(chase);
+    };
+    window.addEventListener("message", onMessage);
+    window.parent.postMessage({ type: "duo-scroll-ready" }, window.location.origin);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
   function showTime(nextTime: number) {
     const clamped = Math.min(SEQUENCE_DURATION, Math.max(0, nextTime));
     timeRef.current = clamped;
@@ -86,7 +153,30 @@ export default function CoordinatedPaperOpening({
 
   function stop() {
     cancelAnimationFrame(foldFrame.current);
+    clacking.current = null;
     setFoldDestination(null);
+  }
+
+  // Accelerate into rest, then a brief cushion: a gradual clack, not a jump.
+  function clack(open: boolean) {
+    cancelAnimationFrame(foldFrame.current);
+    clacking.current = open;
+    setFoldDestination(open);
+    const from = angleAtTime(timeRef.current);
+    const to = open ? 0 : 180;
+    const duration = 120 + 220 * Math.min(1, Math.abs(to - from) / CLACK_ZONE);
+    const started = performance.now();
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const animate = (now: number) => {
+      const t = reducedMotion ? 1 : Math.min(1, (now - started) / duration);
+      const eased = t < 0.82
+        ? 0.97 * (t / 0.82) ** 2.4
+        : 0.97 + 0.03 * (1 - (1 - (t - 0.82) / 0.18) ** 3);
+      showTime(t === 1 ? (open ? SEQUENCE_DURATION : 0) : timeAtAngle(from + (to - from) * eased));
+      if (t < 1) foldFrame.current = requestAnimationFrame(animate);
+      else { clacking.current = null; setFoldDestination(null); }
+    };
+    foldFrame.current = requestAnimationFrame(animate);
   }
 
   function foldStart(event: PointerEvent<HTMLDivElement>) {
@@ -137,8 +227,8 @@ export default function CoordinatedPaperOpening({
       const angle = 90 + pose.leftAngle - pose.rightAngle;
       // Only assist the last few degrees. Mid-fold release must retain the
       // pose so the user can re-grab and reverse freely.
-      if (angle <= 10) settleFold(true);
-      else if (angle >= 170) settleFold(false);
+      if (angle <= CLACK_ZONE) clack(true);
+      else if (angle >= 180 - CLACK_ZONE) clack(false);
     }
   }
 
@@ -148,6 +238,10 @@ export default function CoordinatedPaperOpening({
     const pose = stateAtTime(timeRef.current);
     const from = 90 + pose.leftAngle - pose.rightAngle;
     const to = open ? 0 : 180;
+    if (Math.abs(to - from) <= CLACK_ZONE) {
+      clack(open);
+      return;
+    }
     const duration = 1600 + 800 * Math.abs(to - from) / 180;
     const started = performance.now();
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -159,14 +253,11 @@ export default function CoordinatedPaperOpening({
       const remaining = 1 - progress;
       const eased = 1 - remaining ** 5 * (1 + 5 * progress + 15 * progress * progress);
       const angle = from + (to - from) * eased;
-      let low = 0, high = SEQUENCE_DURATION;
-      for (let i = 0; i < 24; i++) {
-        const mid = (low + high) / 2;
-        const sample = stateAtTime(mid);
-        if (90 + sample.leftAngle - sample.rightAngle > angle) low = mid;
-        else high = mid;
+      if (!reducedMotion && Math.abs(to - angle) <= CLACK_ZONE && Math.abs(to - from) > CLACK_ZONE) {
+        clack(open);
+        return;
       }
-      showTime(progress === 1 ? (open ? SEQUENCE_DURATION : 0) : (low + high) / 2);
+      showTime(progress === 1 ? (open ? SEQUENCE_DURATION : 0) : timeAtAngle(angle));
       if (progress < 1) foldFrame.current = requestAnimationFrame(animate);
       else setFoldDestination(null);
     };

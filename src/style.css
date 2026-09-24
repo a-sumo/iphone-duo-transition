@@ -1,5 +1,6 @@
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; font-family: system-ui, sans-serif; color: #28292d; }
+html, body { background: #ececee; }
 #root { display: flex; flex-direction: column; }
 nav { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px max(12px, env(safe-area-inset-left)); border-bottom: 1px solid #e2e5ed; }
 nav a { display: flex; align-items: center; min-height: 44px; padding: 0 12px; font-size: 13px; text-decoration: none; color: #535d73; border-radius: 8px; }

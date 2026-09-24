@@ -2,8 +2,20 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import BezierEasing from "bezier-easing";
 
 export const SEQUENCE_DURATION = 3.683;
+
+// ── Fold-open curve ──────────────────────────────────────────────────────────
+// One monotonic ease over the WHOLE fold (180° folded → 0° flat). Edit these
+// four cubic-bézier control points to reshape how the phone opens — paste them
+// straight from a visual editor:
+//   • Chrome DevTools: click the easing swatch beside any CSS transition
+//   • https://cubic-bezier.com  — drag the two handles, copy the four numbers
+// Because it's a single curve (not two chained smoothsteps), there's no dwell
+// and no stop at 90°: the phone opens in one continuous motion.
+export const FOLD_EASE: [number, number, number, number] = [0.4, 0, 0.2, 1];
+const openEasing = BezierEasing(...FOLD_EASE);
 
 export type SequenceState = {
   rightAngle: number;
@@ -18,6 +30,8 @@ export type ScreenSurface = "raw-mesh" | "screen-triangles" | "solid-mask" |
   "edge-darkening" | "inner-left" | "inner-right" | "outer-cover";
 
 export type CoordinatedPaperScene = {
+  ready: Promise<void>;
+  measureDetailEnergy: () => number;
   setTime: (seconds: number) => SequenceState;
   beginGrab: (clientX: number, clientY: number) => boolean;
   hitsPhoneSilhouette: (clientX: number, clientY: number) => boolean;
@@ -38,12 +52,17 @@ const smoothstep = (a: number, b: number, value: number) => {
   const t = clamp01((value - a) / (b - a));
   return t * t * (3 - 2 * t);
 };
-const ease = (t: number) => t * t * (3 - 2 * t);
 
 export function stateAtTime(seconds: number): SequenceState {
-  const time = Math.min(SEQUENCE_DURATION, Math.max(0, seconds));
-  const rightAngle = 90 * ease(clamp01((time - .15) / (1.5 - .15)));
-  const leftAngle = 90 * (1 - ease(clamp01((time - 1.7) / (3.15 - 1.7))));
+  const progress = clamp01(seconds / SEQUENCE_DURATION);
+  // Eased "openness": 0 = folded (phoneAngle 180°), 1 = flat (phoneAngle 0°).
+  const open = openEasing(progress);
+  // Keep the right-then-left reveal choreography: the right leaf reads as
+  // opening across the first half of the fold, the left leaf across the second.
+  // Their combination is exactly phoneAngle = 180·(1 − open), so the physical
+  // hinge follows the single eased curve with no hold at 90°.
+  const rightAngle = 90 * clamp01(open * 2);
+  const leftAngle = 90 * (1 - clamp01(open * 2 - 1));
   const paperVisibility = (angle: number) => smoothstep(0, 8, angle);
   return {
     rightAngle,
@@ -195,14 +214,25 @@ export function mountCoordinatedPaperScene(
   stage: HTMLElement,
   innerImageUrl: string,
   outerImageUrl: string,
+  comparison: { stencil?: boolean; shading?: boolean; view?: [number, number, number] } = {},
 ): CoordinatedPaperScene {
+  let resolveReady!: () => void;
+  let rejectReady!: (error: Error) => void;
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  // The normal interactive callers need not await readiness.
+  void ready.catch(() => {});
+  const loading = new THREE.LoadingManager(() => resolveReady());
+  loading.onError = url => rejectReady(new Error(`Unable to load ${url}`));
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   stage.append(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#ffffff");
+  scene.background = new THREE.Color("#ececee");
   // The GLB already carries Star White polished-metal materials. Metals
   // need an environment to reflect; a white background alone provides none.
   // Screen materials are unlit and do not use this hardware-only lighting.
@@ -223,7 +253,9 @@ export function mountCoordinatedPaperScene(
   const displayCrop = new THREE.Vector4(0, 0, 1, 1);
   const imageSize = new THREE.Vector2(imageWidth, imageHeight);
   const darkField = new THREE.Color("#000000");
-  const textureLoader = new THREE.TextureLoader();
+  const captureMask = { value: false };
+  let captureTarget: THREE.WebGLRenderTarget | null = null;
+  const textureLoader = new THREE.TextureLoader(loading);
   const loadScreenTexture = (url: string) => {
     const loaded = textureLoader.load(url, () => render());
     loaded.colorSpace = THREE.SRGBColorSpace;
@@ -252,6 +284,20 @@ export function mountCoordinatedPaperScene(
   let inspectionTriangles = false;
   let moveView = false;
   let disposed = false;
+  // Horizontal centring of the fold. As the phone opens its visual centre drifts
+  // (the GLB pivot is off to one side and the unfolding leaf grows the body one
+  // way), so we slide the *view* to follow it — like the Apple newsroom clip
+  // where the phone eases sideways as it opens. This offsets the orthographic
+  // frustum only; geometry never moves, so the stencil / image-plane
+  // registration stays valid. Measured once per pose at load, lerped by fold.
+  let frustumHalfWidth = 3;
+  let frustumHalfHeight = 2;
+  let panX = 0;
+  let centreFolded = 0;
+  let centreOpen = 0;
+  let foldAngleClosed = 180;
+  let foldAngleOpen = 0;
+  let foldCentringReady = false;
   const foldAxis = new THREE.Vector3(1, 0, 0);
   const foldQuaternion = new THREE.Quaternion();
   const displayMeshes: THREE.Mesh[] = [];
@@ -261,6 +307,17 @@ export function mountCoordinatedPaperScene(
   const viewToEye = { value: new THREE.Vector3(0, 0, 1) };
   const leafFacing = { value: 1 };
   let leafFace: { mesh: THREE.Mesh; a: number; b: number; c: number } | null = null;
+  // The cover's image plane keeps its registered orientation, but its hinge-side
+  // border rides with the display's hinge-side edge. The hinge axis sits off the
+  // glass, so a fully stationary plane would slide away from that edge and
+  // expose the dark field between bezel and artwork while the cover swings.
+  let coverAnchor: {
+    mesh: THREE.Mesh;
+    index: number;
+    rest: THREE.Vector3;
+    origin: THREE.Vector3;
+    visual: ImagePlaneVisual;
+  } | null = null;
   const hardwareVisibility: Array<{ mesh: THREE.Mesh; visible: boolean }> = [];
   const cameraGlass: Array<{ mesh: THREE.Mesh; material: THREE.Material; visible: boolean }> = [];
   const imagePlaneVisuals: ImagePlaneVisual[] = [];
@@ -282,9 +339,9 @@ export function mountCoordinatedPaperScene(
   const leftPaper = { value: 0 };
   const leftAngle = { value: 90 };
   const rightPaper = { value: 0 };
-  const blurIntensity = { value: 1.6 };
+  const blurIntensity = { value: 2.6 };
   const transitionLength = { value: 0.75 };
-  const edgeDarkening = { value: 1 };
+  const edgeDarkening = { value: 1.4 };
   const imagePlanes = new Map<boolean, {
     origin: { value: THREE.Vector3 };
     axisU: { value: THREE.Vector3 };
@@ -292,7 +349,7 @@ export function mountCoordinatedPaperScene(
     normal: { value: THREE.Vector3 };
   }>();
 
-  new GLTFLoader().load(`${import.meta.env.BASE_URL}models/iphone-duo-full-replaced-screen.glb`, (gltf) => {
+  new GLTFLoader(loading).load(`${import.meta.env.BASE_URL}models/iphone-duo-full-replaced-screen.glb`, (gltf) => {
     if (disposed) return;
     phone = gltf.scene;
     const scale = imageWidth / 0.15856843;
@@ -300,6 +357,48 @@ export function mountCoordinatedPaperScene(
     phone.position.set(0, -0.05889157 * scale, -0.08);
     phoneHinge = phone.getObjectByName("Bone_Hinge_46") as THREE.Bone | null;
     phoneLeaf = phone.getObjectByName("Bone_01_45") as THREE.Bone | null;
+    // The black border around the displays reads as matte on the real
+    // device. The exported semi-gloss finish reflected the studio as a grey
+    // sheen with a highlight along the top edge.
+    phone.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        // BASE_Black_Plastic is the thin glossy ring right around each display;
+        // at a slight angle it mirrored the studio as a bright edge.
+        if (material.name !== "BASE_Black_Front_Border" && material.name !== "BASE_Black_Plastic") continue;
+        const border = material as THREE.MeshStandardMaterial;
+        border.color.setRGB(0, 0, 0);
+        border.roughness = 1;
+        border.metalness = 0;
+        border.envMapIntensity = 0.12;
+      }
+    });
+    // The Star White frame is one metal mesh per half, but on the device only
+    // its sides are polished metal: the lip facing the user around a display
+    // is black. Blend faces aligned with a display's normal (+Z for the inner
+    // screen on both halves, -Z for the cover on the left half) to matte black.
+    for (const [name, bothFaces] of [["Object_10", false], ["Object_66", true]] as const) {
+      const frame = phone.getObjectByName(name) as THREE.Mesh | null;
+      if (!frame || Array.isArray(frame.material)) continue;
+      const material = (frame.material as THREE.MeshStandardMaterial).clone();
+      material.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader
+          .replace("#include <common>", "#include <common>\nvarying float vFrameFacing;")
+          .replace("#include <begin_vertex>", `#include <begin_vertex>
+            vFrameFacing = ${bothFaces ? "abs(normal.z)" : "normal.z"};`);
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>", "#include <common>\nvarying float vFrameFacing;")
+          .replace("#include <metalnessmap_fragment>", `#include <metalnessmap_fragment>
+            float frameLip = smoothstep(0.55, 0.8, vFrameFacing);
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.0), frameLip);
+            metalnessFactor = mix(metalnessFactor, 0.0, frameLip);
+            roughnessFactor = mix(roughnessFactor, 1.0, frameLip);`)
+          .replace("#include <opaque_fragment>", `outgoingLight *= 1.0 - 0.85 * frameLip;
+            #include <opaque_fragment>`);
+      };
+      material.customProgramCacheKey = () => `frame-lip-${bothFaces ? "both" : "front"}`;
+      frame.material = material;
+    }
     const phoneAxle = phone.getObjectByName("Axle_9");
     // The exported axle sits about 0.9 mm laterally outside the closed leaf,
     // leaving a white slit between the silver hinge and the black bezel.
@@ -340,6 +439,9 @@ export function mountCoordinatedPaperScene(
       };
       imagePlanes.set(outer, plane);
       material.onBeforeCompile = (shader) => {
+        shader.uniforms.uCaptureMask = captureMask;
+        shader.uniforms.uUseStencil = { value: comparison.stencil !== false };
+        shader.uniforms.uUseShading = { value: comparison.shading !== false ? 1 : 0 };
         shader.uniforms.uCrop = { value: displayCrop };
         shader.uniforms.uScreenImage = { value: screenTexture };
         shader.uniforms.uImageSize = { value: imageSize };
@@ -361,14 +463,22 @@ export function mountCoordinatedPaperScene(
         shader.uniforms.uPlaneV = plane.axisV;
         shader.uniforms.uPlaneNormal = plane.normal;
         shader.vertexShader = shader.vertexShader
-          .replace("#include <common>", "#include <common>\nvarying vec2 vDisplayUv;\nvarying vec3 vPaperWorld;")
+          .replace("#include <common>", "#include <common>\nvarying vec2 vDisplayUv;\nvarying vec3 vPaperWorld;\nvarying vec3 vPaperNormal;")
           .replace("#include <uv_vertex>", "#include <uv_vertex>\nvDisplayUv = uv;")
-          .replace("#include <project_vertex>",
-            "vPaperWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#include <project_vertex>");
+          .replace("#include <project_vertex>", `vPaperWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+            // Smooth, skinned vertex normals. Screen-space derivatives give one
+            // normal per triangle, which steps the blur along the fold crease.
+            #if defined( USE_ENVMAP ) || defined( USE_SKINNING )
+              vPaperNormal = normalize(inverseTransformDirection(transformedNormal, viewMatrix));
+            #else
+              vPaperNormal = normalize(mat3(modelMatrix) * normal);
+            #endif
+            #include <project_vertex>`);
         shader.fragmentShader = shader.fragmentShader
           .replace("#include <common>", `#include <common>
             varying vec2 vDisplayUv;
             varying vec3 vPaperWorld;
+            varying vec3 vPaperNormal;
             uniform sampler2D uScreenImage;
             uniform vec4 uCrop;
             uniform vec2 uImageSize;
@@ -381,6 +491,9 @@ export function mountCoordinatedPaperScene(
             uniform float uBlurIntensity;
             uniform float uTransitionLength;
             uniform float uEdgeDarkening;
+            uniform bool uUseStencil;
+            uniform bool uCaptureMask;
+            uniform float uUseShading;
             uniform float uInspectionMode;
             uniform float uHingeAngle;
             uniform vec3 uViewToEye;
@@ -446,7 +559,9 @@ export function mountCoordinatedPaperScene(
             bool rawMeshMode = uInspectionMode > 8.5 && uInspectionMode < 9.5;
             bool maskDiagnostic = (uInspectionMode > 0.5 && uInspectionMode < 5.5) ||
                                   (uInspectionMode > 6.5 && uInspectionMode < 7.5);
-            if (rawMeshMode) {
+            if (uCaptureMask) {
+              diffuseColor.rgb = vec3(uOuterScreen > 0.5 || screenUv.x < 0.5 ? 1.0 : 0.0);
+            } else if (rawMeshMode) {
               diffuseColor.rgb = vec3(0.16, 0.18, 0.22);
             } else if (maskDiagnostic) {
               if (uInspectionMode < 1.5 && (uOuterScreen > 0.5 || screenUv.x >= 0.5)) discard;
@@ -489,10 +604,6 @@ export function mountCoordinatedPaperScene(
               float transitionWidth = 0.50 * clamp(uTransitionLength, 0.05, 1.0);
               float transitionStart = 0.50 - transitionWidth;
               float transitionMask = 1.0 - smoothstep(transitionStart, 0.50, screenUv.x);
-              // Keep the art-directed shade on its established footprint.
-              // The user can lengthen the soft paper transition without also
-              // moving or widening the darkening profile.
-              float darkeningMask = 1.0 - smoothstep(0.25, 0.50, screenUv.x);
               // The inner sheet uses the soft hinge transition. The outer
               // cover is a separate full-screen sheet: as that rigid stencil
               // lifts away from its registered image plane, the entire cover
@@ -506,7 +617,7 @@ export function mountCoordinatedPaperScene(
               vec3 baseColor = mix(uDarkField, fixedImage, coverage);
               if (paperAmount > 0.001 &&
                   (uInspectionMode < 0.5 || uInspectionMode > 7.5)) {
-                vec3 normal = normalize(cross(dFdx(vPaperWorld), dFdy(vPaperWorld)));
+                vec3 normal = normalize(vPaperNormal);
                 float grazing = 1.0 - abs(dot(normal, toEye));
                 vec3 axisGuide = abs(dot(ray, uPlaneNormal)) > 0.9 ?
                   vec3(0.0, 1.0, 0.0) : uPlaneNormal;
@@ -523,8 +634,12 @@ export function mountCoordinatedPaperScene(
                 // do not inject an artificial recessed backdrop.
                 float effectiveGap = gap;
                 vec3 scatterOrigin = vPaperWorld;
-                float blurBlend = smoothstep(0.0, 0.002, effectiveGap) *
-                  smoothstep(0.0, 0.001, scatter);
+                // Fade the blur in by its footprint on the image, in texels.
+                // A near-zero distance cutoff switched it on abruptly and drew
+                // a visible line along the fold edge.
+                float radiusTexels = effectiveGap * scatter * 2432.0 / uImageSize.x /
+                  max(abs(dot(ray, uPlaneNormal)), 0.1);
+                float blurBlend = smoothstep(0.5, 3.0, radiusTexels);
                 vec3 under = sharp;
                 if (blurBlend > 0.001) {
                   vec3 blurred = vec3(0.0);
@@ -571,38 +686,31 @@ export function mountCoordinatedPaperScene(
                 float smoothGrazing = max(grazing,
                   (1.0 - uOuterScreen) * leafGrazing * revealWeight * transitionMask);
                 float opticalDepth = pow(1.0 / max(1.0 - smoothGrazing, 0.17), 1.45);
-                // Transmission loss is an artistic approximation confined to
-                // the lifting interior sheet. The cover scatters without
-                // acquiring this additional tint; contact stays unattenuated.
+                // Transmission loss is an artistic approximation applied to
+                // whichever sheet is lifting; contact stays unattenuated.
                 float distanceLoss = exp(-0.35 * gap);
                 float transmission = pow(clamp(0.89 + fiber * 0.008, 0.0, 0.97), opticalDepth)
                   * distanceLoss;
                 vec3 dimFill = vec3(0.035, 0.041, 0.047) + fiber * 0.005;
-                float interiorAttenuation = (1.0 - uOuterScreen) * paperAmount *
+                // Both sheets lose light as they lift away, the cover included:
+                // Apple's cover dims as it swings open rather than washing out.
+                float interiorAttenuation = paperAmount *
                   smoothstep(0.0, 0.025, gap);
                 vec3 paperColor = mix(under, mix(dimFill, under, transmission),
-                  interiorAttenuation);
-                // Separate art-directed edge falloff visible in the reference:
-                // strongest along the free edge, gentle at top/bottom, and
-                // absent by the hinge. This is independent of the ray spread.
-                float freeEdge = 1.0 - smoothstep(0.0, 0.24, screenUv.x);
-                float horizontalEdges = 1.0 - smoothstep(0.0, 0.15,
-                  min(screenUv.y, 1.0 - screenUv.y));
-                float edgeShade = uEdgeDarkening *
-                  min(0.60, 0.43 * freeEdge + 0.12 * horizontalEdges);
-                edgeShade = min(edgeShade, 0.95);
+                  interiorAttenuation * uUseShading);
                 // The convolution already approaches sharp at zero radius.
                 // Do not reintroduce an unfiltered image boundary here.
                 baseColor = mix(baseColor, paperColor, coverage);
+                // Darkening follows the blur. The further the sheet lifts off
+                // its glowing image, the wider each point's scattering cone:
+                // more of its light is absorbed along the way and more of the
+                // cone falls past the image onto the dark housing. Attenuate by
+                // the same radius that sets the blur, so shade and softness
+                // share one gradient instead of a painted edge profile.
+                float blurRadius = gap * scatter / max(abs(dot(ray, uPlaneNormal)), 0.1);
                 float edgeEnabled = (uInspectionMode < 0.5 || uInspectionMode > 9.5) ? 1.0 : 0.0;
-                float darkeningAmount = edgeEnabled *
-                  (1.0 - uOuterScreen) * uLeftPaper * darkeningMask;
-                // Subtract only the darkened paper contribution. At the
-                // default profile this is algebraically identical to shading
-                // paperColor before the mix, while remaining independent of
-                // the adjustable smoothing length.
-                baseColor = max(vec3(0.0), baseColor -
-                  paperColor * edgeShade * darkeningAmount);
+                float lightLoss = 1.0 - exp(-3.5 * uEdgeDarkening * blurRadius);
+                baseColor *= 1.0 - edgeEnabled * lightLoss;
               }
               // Keep each display on its own stationary image plane at every
               // viewpoint. Switching to mesh UVs would abruptly change the
@@ -613,6 +721,10 @@ export function mountCoordinatedPaperScene(
               // Fade only near grazing incidence, without changing UV mapping.
               float imageFacing = smoothstep(0.0, 0.06, dot(toEye, uPlaneNormal));
               diffuseColor.rgb = mix(uDarkField, baseColor, imageFacing);
+              if (!uUseStencil) {
+                vec2 attachedUv = mix(screenUv, coverImageUv(screenUv), uOuterScreen);
+                diffuseColor.rgb = sampleDisplay(attachedUv);
+              }
             }
             diffuseColor.a = opacity;
           `);
@@ -669,8 +781,39 @@ export function mountCoordinatedPaperScene(
       );
       imagePlaneVisuals.push(visual);
       scene.add(visual.mesh, visual.outline);
+      if (outer) {
+        // Hinge-side edge: smallest u, nearest the vertical middle.
+        const uv = screen.geometry.getAttribute("uv");
+        let minU = Infinity;
+        for (let i = 0; i < uv.count; i++) minU = Math.min(minU, uv.getX(i));
+        let index = 0, best = Infinity;
+        for (let i = 0; i < uv.count; i++) {
+          if (uv.getX(i) > minU + 0.01) continue;
+          const score = Math.abs(uv.getY(i) - 0.5);
+          if (score < best) { best = score; index = i; }
+        }
+        coverAnchor = {
+          mesh: screen,
+          index,
+          rest: screen.localToWorld(screen.getVertexPosition(index, new THREE.Vector3())),
+          origin: fitted.origin.clone(),
+          visual,
+        };
+      }
     }
     scene.add(phone);
+    // Sample the phone's horizontal centre AND the hinge angle at the folded and
+    // fully-open poses. The slide is then keyed to the actual hinge angle (not
+    // elapsed time), so the view reaches its final position exactly as the fold
+    // completes — the opening is eased, so a time-based slide would keep drifting
+    // after the phone already looks open.
+    setTime(0);
+    centreFolded = measureCentreX();
+    foldAngleClosed = hingeAngle.value;
+    setTime(SEQUENCE_DURATION);
+    centreOpen = measureCentreX();
+    foldAngleOpen = hingeAngle.value;
+    foldCentringReady = true;
     setTime(initialTime);
     render();
   });
@@ -678,6 +821,15 @@ export function mountCoordinatedPaperScene(
   function render() {
     if (disposed) return;
     camera.getWorldDirection(viewToEye.value).negate();
+    if (coverAnchor) {
+      const { mesh, index, rest, origin, visual } = coverAnchor;
+      phone?.updateMatrixWorld(true);
+      if (mesh instanceof THREE.SkinnedMesh) mesh.skeleton.update();
+      const shift = mesh.localToWorld(mesh.getVertexPosition(index, new THREE.Vector3())).sub(rest);
+      imagePlanes.get(true)?.origin.value.copy(origin).add(shift);
+      visual.mesh.position.copy(shift);
+      visual.outline.position.copy(shift);
+    }
     if (leafFace) {
       phone?.updateMatrixWorld(true);
       const { mesh, a, b, c } = leafFace;
@@ -692,7 +844,7 @@ export function mountCoordinatedPaperScene(
   }
 
   function resetCamera() {
-    camera.position.set(0, 0, 10);
+    camera.position.set(...(comparison.view ?? [0, 0, 10]));
     camera.zoom = 1;
     camera.lookAt(0, 0, 0);
     controls.target.set(0, 0, 0);
@@ -700,16 +852,49 @@ export function mountCoordinatedPaperScene(
     camera.updateProjectionMatrix();
   }
 
+  // Offset the (symmetric) orthographic frustum horizontally by panX so a phone
+  // whose visual centre sits at world-x panX renders in the middle of the stage.
+  function applyFrustum() {
+    camera.left = -frustumHalfWidth + panX;
+    camera.right = frustumHalfWidth + panX;
+    camera.top = frustumHalfHeight;
+    camera.bottom = -frustumHalfHeight;
+    camera.updateProjectionMatrix();
+  }
+
+  // World-x centre of the display screens at the current fold, using the skinned
+  // vertex positions so it tracks the bones as the phone opens.
+  function measureCentreX() {
+    let min = Infinity;
+    let max = -Infinity;
+    const vertex = new THREE.Vector3();
+    for (const mesh of displayMeshes) {
+      const position = mesh.geometry.getAttribute("position");
+      if (!position) continue;
+      const skinned = mesh as THREE.SkinnedMesh;
+      const isSkinned = skinned.isSkinnedMesh === true;
+      if (isSkinned) skinned.skeleton.update();
+      mesh.updateWorldMatrix(true, false);
+      const step = Math.max(1, Math.floor(position.count / 240));
+      for (let i = 0; i < position.count; i += step) {
+        vertex.fromBufferAttribute(position, i);
+        if (isSkinned) skinned.applyBoneTransform(i, vertex);
+        mesh.localToWorld(vertex);
+        if (vertex.x < min) min = vertex.x;
+        if (vertex.x > max) max = vertex.x;
+      }
+    }
+    return Number.isFinite(min) ? (min + max) / 2 : 0;
+  }
+
   function resize() {
     const width = Math.max(stage.clientWidth, 1);
     const height = Math.max(stage.clientHeight, 1);
     const aspect = width / height;
     const viewHeight = Math.max(imageHeight * 1.3, imageWidth * 1.22 / aspect);
-    camera.left = -viewHeight * aspect / 2;
-    camera.right = viewHeight * aspect / 2;
-    camera.top = viewHeight / 2;
-    camera.bottom = -viewHeight / 2;
-    camera.updateProjectionMatrix();
+    frustumHalfWidth = viewHeight * aspect / 2;
+    frustumHalfHeight = viewHeight / 2;
+    applyFrustum();
     if (!moveView) resetCamera();
     renderer.setSize(width, height, false);
     setTime(sequenceTime);
@@ -727,6 +912,18 @@ export function mountCoordinatedPaperScene(
     leftPaper.value = state.leftPaper;
     leftAngle.value = state.leftAngle;
     rightPaper.value = state.rightPaper;
+    if (foldCentringReady) {
+      // Slide the view between the folded and fully-open centres in step with
+      // the actual hinge angle (not elapsed time). This way the phone reaches
+      // its final centred position exactly as the fold finishes and then stops —
+      // it never keeps drifting once the phone already looks open.
+      const span = foldAngleOpen - foldAngleClosed;
+      const openFraction = Math.abs(span) > 1e-3
+        ? THREE.MathUtils.clamp((phoneAngle - foldAngleClosed) / span, 0, 1)
+        : 0;
+      panX = centreFolded + (centreOpen - centreFolded) * openFraction;
+      applyFrustum();
+    }
     render();
     return state;
   }
@@ -753,6 +950,76 @@ export function mountCoordinatedPaperScene(
   }
 
   return {
+    ready,
+    measureDetailEnergy() {
+      // Fixed square render, linear luminance, moving display only. Use the
+      // production material itself so progressive scattering is measured too.
+      const size = 512;
+      captureTarget ??= new THREE.WebGLRenderTarget(size, size, {
+        type: THREE.HalfFloatType, samples: Math.min(4, renderer.capabilities.maxSamples),
+      });
+      const saved = [camera.left, camera.right, camera.top, camera.bottom];
+      const span = Math.max(imageHeight * 1.3, imageWidth * 1.22);
+      camera.left = camera.bottom = -span / 2;
+      camera.right = camera.top = span / 2;
+      camera.updateProjectionMatrix();
+      const target = renderer.getRenderTarget();
+      const background = scene.background;
+      const pixels = new Uint16Array(size * size * 4);
+      const mask = new Uint16Array(size * size * 4);
+      const black = new THREE.MeshBasicMaterial({ color: 0, toneMapped: false });
+      const changed: Array<[THREE.Mesh, THREE.Material | THREE.Material[]]> = [];
+      try {
+        renderer.setRenderTarget(captureTarget);
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null); // Resolve the multisampled target before readback.
+        renderer.readRenderTargetPixels(captureTarget, 0, 0, size, size, pixels);
+        scene.background = new THREE.Color(0);
+        phone?.traverse(object => {
+          if (object instanceof THREE.Mesh && !displayMeshes.includes(object)) {
+            changed.push([object, object.material]);
+            object.material = black;
+          }
+        });
+        captureMask.value = true;
+        renderer.setRenderTarget(captureTarget);
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null);
+        renderer.readRenderTargetPixels(captureTarget, 0, 0, size, size, mask);
+      } finally {
+        captureMask.value = false;
+        changed.forEach(([object, material]) => { object.material = material; });
+        black.dispose();
+        scene.background = background;
+        [camera.left, camera.right, camera.top, camera.bottom] = saved;
+        camera.updateProjectionMatrix();
+        renderer.setRenderTarget(target);
+      }
+      const gray = new Float32Array(size * size);
+      for (let i = 0; i < gray.length; i++) gray[i] =
+        .2126 * THREE.DataUtils.fromHalfFloat(pixels[i * 4]) +
+        .7152 * THREE.DataUtils.fromHalfFloat(pixels[i * 4 + 1]) +
+        .0722 * THREE.DataUtils.fromHalfFloat(pixels[i * 4 + 2]);
+      const kernel: Array<[number, number, number]> = [];
+      let weight = 0;
+      for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) {
+        const w = Math.exp(-(x * x + y * y) / 1.28);
+        kernel.push([x, y, w]); weight += w;
+      }
+      let energy = 0, count = 0;
+      for (let y = 3; y < size - 3; y++) for (let x = 3; x < size - 3; x++) {
+        let eligible = true;
+        for (let dy = -3; dy <= 3 && eligible; dy++) for (let dx = -3; dx <= 3; dx++) {
+          if (THREE.DataUtils.fromHalfFloat(mask[((y + dy) * size + x + dx) * 4]) < .99) { eligible = false; break; }
+        }
+        if (!eligible) continue;
+        let low = 0;
+        for (const [dx, dy, w] of kernel) low += gray[(y + dy) * size + x + dx] * w;
+        energy += (gray[y * size + x] - low / weight) ** 2;
+        count++;
+      }
+      return count >= 64 ? energy / count : NaN;
+    },
     setTime,
     hitsPhoneSilhouette(clientX, clientY) {
       if (!phone) return false;
@@ -1000,6 +1267,7 @@ export function mountCoordinatedPaperScene(
       studioReflection.dispose();
       controls.dispose();
       renderer.dispose();
+      captureTarget?.dispose();
       renderer.domElement.remove();
     },
   };

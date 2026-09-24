@@ -4,6 +4,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 export type FoldSide = "left" | "right";
 
 export type TracingPaperScene = {
+  ready: Promise<void>;
+  renderFold: (side: FoldSide, degrees: number) => void;
   setFold: (side: FoldSide, degrees: number) => void;
   setRaySpread: (amount: number) => void;
   setMoveView: (enabled: boolean) => void;
@@ -22,7 +24,8 @@ export function mountTracingPaperScene(
   stage.append(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#ffffff");
+  // A subtle cool grey instead of pure white, shared by every lab scene.
+  scene.background = new THREE.Color("#ececee");
 
   // Match Turner's 1200 × 782 source without cropping or stretching it.
   const screenWidth = 3.82;
@@ -51,7 +54,15 @@ export function mountTracingPaperScene(
   controls.screenSpacePanning = true;
   controls.target.set(0, 0, 0);
 
-  const screenTexture = new THREE.TextureLoader().load(imageUrl);
+  let resolveReady!: () => void;
+  let rejectReady!: (error: Error) => void;
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  void ready.catch(() => {});
+  const screenTexture = new THREE.TextureLoader().load(imageUrl, () => resolveReady(),
+    undefined, () => rejectReady(new Error(`Unable to load ${imageUrl}`)));
   screenTexture.colorSpace = THREE.SRGBColorSpace;
   screenTexture.anisotropy = Math.min(
     renderer.capabilities.getMaxAnisotropy(),
@@ -73,6 +84,15 @@ export function mountTracingPaperScene(
     uAngle: { value: 0 },
     uFoldSide: { value: 1 },
     uRaySpread: { value: 0.55 },
+    // The tabletop around the image, as seen through the paper.
+    uTable: { value: (scene.background as THREE.Color).clone() },
+    // Grab hint: a faint dot grid printed on the sheet, lit by a passing wave.
+    uPaperSize: { value: new THREE.Vector2(paperWidth, paperHeight) },
+    uHint: { value: 0 },
+    uHintTime: { value: 0 },
+    uHintFocus: { value: new THREE.Vector2() },
+    uHintGather: { value: 0 },
+    uHintStatic: { value: 0 },
   };
   const paperMaterial = new THREE.ShaderMaterial({
     uniforms: paperUniforms,
@@ -122,6 +142,13 @@ export function mountTracingPaperScene(
       uniform sampler2D uScreen;
       uniform vec2 uSize;
       uniform float uRaySpread;
+      uniform vec3 uTable;
+      uniform vec2 uPaperSize;
+      uniform float uHint;
+      uniform float uHintTime;
+      uniform vec2 uHintFocus;
+      uniform float uHintGather;
+      uniform float uHintStatic;
       float hash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
       float noise(vec2 p) {
         vec2 i=floor(p), f=fract(p);
@@ -133,7 +160,7 @@ export function mountTracingPaperScene(
         vec2 uv=point/uSize+.5;
         float inside=step(0.,uv.x)*step(uv.x,1.)*step(0.,uv.y)*step(uv.y,1.);
         vec4 pixel=texture2D(uScreen,clamp(uv,0.,1.));
-        return mix(vec3(1.),pixel.rgb,pixel.a*inside);
+        return mix(uTable,pixel.rgb,pixel.a*inside);
       }
       void main() {
         vec3 normal=normalize(vNormal);
@@ -185,6 +212,24 @@ export function mountTracingPaperScene(
         vec3 litNormal=normal*(gl_FrontFacing?1.:-1.);
         color*=.87+.13*max(dot(litNormal,normalize(vec3(-.4,.6,1.))),0.);
         color+=pow(grazing,3.)*.07;
+        if (uHint>.001) {
+          // Dots live in the sheet's own coordinates, so they bend with it.
+          vec2 local=(vUv-.5)*uPaperSize;
+          const float spacing=.16;
+          float dotDistance=length(fract(local/spacing)-.5)*spacing;
+          float aa=max(fwidth(dotDistance),1e-4);
+          float dotMask=1.-smoothstep(.011-aa,.011+aa,dotDistance);
+          // Idle: a soft front travels outward from the spine, then rests.
+          float cycle=mod(uHintTime,4.8);
+          float front=cycle/2.6*3.0;
+          float idle=exp(-pow((abs(local.x)-front)/.5,2.))*(1.-smoothstep(2.2,2.6,cycle));
+          // Grabbed: the front contracts onto the grab point.
+          float ring=length(local-uHintFocus)-mix(2.8,0.,uHintGather);
+          float gather=exp(-pow(ring/.35,2.));
+          float wave=mix(mix(idle,gather,step(.001,uHintGather)),.45,uHintStatic);
+          float shimmer=.45+.55*noise(local*2.2+vec2(uHintTime*.35,0.));
+          color+=vec3(dotMask*wave*shimmer*uHint*.55);
+        }
         gl_FragColor=vec4(color,1.);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -221,6 +266,22 @@ export function mountTracingPaperScene(
   const hingeProjected = new THREE.Vector3();
   const rightProjected = new THREE.Vector3();
   let lastFrameTime = performance.now();
+  const HINT_KEY = "tracing-paper-fold-hint-done";
+  const readHintDone = () => {
+    try { return localStorage.getItem(HINT_KEY) === "1"; } catch { return false; }
+  };
+  let hintDone = readHintDone();
+  let hintStart = performance.now() + 1200;
+  let gatherStart: number | null = null;
+  // Hovering the sheet replays the wave on demand, even after the one-time
+  // hint has been retired.
+  let hovering = false;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  function finishHint() {
+    if (hintDone) return;
+    hintDone = true;
+    try { localStorage.setItem(HINT_KEY, "1"); } catch { /* storage unavailable */ }
+  }
   let cameraMoved = false;
   let visible = true;
   let frame = 0;
@@ -256,6 +317,10 @@ export function mountTracingPaperScene(
       Math.abs(planeHit.y) > paperHeight / 2
     ) return;
     const side: FoldSide = planeHit.x < 0 ? "left" : "right";
+    if (!hintDone) {
+      gatherStart = performance.now();
+      paperUniforms.uHintFocus.value.set(planeHit.x, planeHit.y);
+    }
     hingeProjected.set(0, 0, 0.035).project(camera);
     rightProjected.set(1, 0, 0.035).project(camera);
     const directionX = (rightProjected.x - hingeProjected.x) * bounds.width / 2;
@@ -275,7 +340,35 @@ export function mountTracingPaperScene(
     event.preventDefault();
   }
 
+  function paperHitAt(clientX: number, clientY: number) {
+    const bounds = renderer.domElement.getBoundingClientRect();
+    const x = ((clientX - bounds.left) / bounds.width) * 2 - 1;
+    const y = -((clientY - bounds.top) / bounds.height) * 2 + 1;
+    pointerRay.setFromCamera(new THREE.Vector2(x, y), camera);
+    return !!pointerRay.ray.intersectPlane(paperPlane, planeHit) &&
+      Math.abs(planeHit.x) <= halfPaperWidth &&
+      Math.abs(planeHit.y) <= paperHeight / 2;
+  }
+
+  function updateHover(event: PointerEvent) {
+    const over = !drag && !moveView && event.pointerType === "mouse" &&
+      paperHitAt(event.clientX, event.clientY);
+    if (over && !hovering) {
+      hintStart = performance.now();
+      gatherStart = null;
+      paperUniforms.uHintGather.value = 0;
+    }
+    hovering = over;
+    if (!drag) renderer.domElement.style.cursor = over ? "grab" : "";
+  }
+
+  function pointerLeave() {
+    hovering = false;
+    if (!drag) renderer.domElement.style.cursor = "";
+  }
+
   function pointerMove(event: PointerEvent) {
+    if (!drag) updateHover(event);
     if (!drag || event.pointerId !== drag.pointerId) return;
     const delta =
       (event.clientX - drag.startX) * drag.directionX +
@@ -289,6 +382,7 @@ export function mountTracingPaperScene(
       175,
     );
     requestFold(drag.side, degrees);
+    if (Math.abs(degrees - drag.startAngle) > 8) finishHint();
     onFoldChange?.(drag.side, Math.round(degrees));
     event.preventDefault();
   }
@@ -296,7 +390,13 @@ export function mountTracingPaperScene(
   function pointerEnd(event: PointerEvent) {
     if (!drag || event.pointerId !== drag.pointerId) return;
     drag = null;
-    renderer.domElement.style.cursor = "";
+    renderer.domElement.style.cursor = hovering ? "grab" : "";
+    // A grab without a fold: bring the hint back after a pause.
+    if (!hintDone) {
+      gatherStart = null;
+      paperUniforms.uHintGather.value = 0;
+      hintStart = performance.now() + 2500;
+    }
     if (renderer.domElement.hasPointerCapture(event.pointerId)) {
       renderer.domElement.releasePointerCapture(event.pointerId);
     }
@@ -306,6 +406,7 @@ export function mountTracingPaperScene(
   renderer.domElement.addEventListener("pointermove", pointerMove);
   renderer.domElement.addEventListener("pointerup", pointerEnd);
   renderer.domElement.addEventListener("pointercancel", pointerEnd);
+  renderer.domElement.addEventListener("pointerleave", pointerLeave);
 
   function fitDistance() {
     const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
@@ -342,6 +443,20 @@ export function mountTracingPaperScene(
   });
   visibilityObserver.observe(stage);
 
+  function updateHint(now: number, elapsed: number) {
+    let target = ((hovering && !drag) || !hintDone) && !moveView && now >= hintStart ? 1 : 0;
+    if (gatherStart !== null) {
+      const gather = Math.min((now - gatherStart) / 650, 1);
+      paperUniforms.uHintGather.value = gather;
+      if (gather >= 1) target = 0;
+    }
+    const hint = paperUniforms.uHint;
+    hint.value += (target - hint.value) * (1 - Math.exp(-elapsed / 0.35));
+    if (hint.value < 0.002) hint.value = target === 0 ? 0 : hint.value;
+    paperUniforms.uHintStatic.value = reducedMotion.matches ? 1 : 0;
+    if (!reducedMotion.matches) paperUniforms.uHintTime.value = Math.max(0, (now - hintStart) / 1000);
+  }
+
   function render() {
     frame = requestAnimationFrame(render);
     if (!visible || document.hidden) return;
@@ -360,6 +475,7 @@ export function mountTracingPaperScene(
     }
     const radians = THREE.MathUtils.degToRad(currentAngle);
     paperUniforms.uAngle.value = radians;
+    updateHint(now, elapsed);
     controls.update();
     // Screen-space panning is intuitive overhead; project its target back
     // onto the XY tabletop when the view becomes oblique.
@@ -372,6 +488,19 @@ export function mountTracingPaperScene(
   render();
 
   return {
+    ready,
+    renderFold(side, degrees) {
+      // Deterministic export: bypass only pointer smoothing, not the shader.
+      activeSide = side;
+      queuedFold = null;
+      currentAngle = targetAngle = THREE.MathUtils.clamp(degrees, 0, 180);
+      paperUniforms.uFoldSide.value = side === "right" ? 1 : -1;
+      paperUniforms.uAngle.value = THREE.MathUtils.degToRad(currentAngle);
+      const hint = paperUniforms.uHint.value;
+      paperUniforms.uHint.value = 0;
+      renderer.render(scene, camera);
+      paperUniforms.uHint.value = hint;
+    },
     setFold: requestFold,
     setRaySpread(amount) {
       paperUniforms.uRaySpread.value = THREE.MathUtils.clamp(amount, 0, 1);
@@ -389,6 +518,7 @@ export function mountTracingPaperScene(
       renderer.domElement.removeEventListener("pointermove", pointerMove);
       renderer.domElement.removeEventListener("pointerup", pointerEnd);
       renderer.domElement.removeEventListener("pointercancel", pointerEnd);
+      renderer.domElement.removeEventListener("pointerleave", pointerLeave);
       resizeObserver.disconnect();
       visibilityObserver.disconnect();
       controls.dispose();

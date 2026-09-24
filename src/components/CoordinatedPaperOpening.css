@@ -8,7 +8,7 @@
   margin: 38px 0 58px 50%;
   transform: translateX(-50%);
   border: 1px solid #e2e5ed;
-  background: #fff;
+  background: #ececee;
   color: #282728;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 13px;
@@ -18,7 +18,7 @@
 .tp-opening * { box-sizing: border-box; }
 .tp-opening--inspecting { grid-template-columns: minmax(0, 1fr) 280px; }
 .tp-opening--standalone { width: 100%; height: 100dvh; margin: 0; transform: none; border: 0; overflow: hidden; }
-.tp-opening__stage { grid-area: stage; position: relative; height: clamp(320px, 50vw, 560px); min-width: 0; min-height: 0; overflow: hidden; background: #fff; touch-action: none; }
+.tp-opening__stage { grid-area: stage; position: relative; height: clamp(320px, 50vw, 560px); min-width: 0; min-height: 0; overflow: hidden; background: #ececee; touch-action: none; }
 .tp-opening--standalone .tp-opening__stage { height: 100%; }
 .tp-opening__stage canvas { display: block; width: 100%; height: 100%; cursor: default; touch-action: none; }
 .tp-opening__stage--view canvas { cursor: grab; }
