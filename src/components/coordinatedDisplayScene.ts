@@ -1014,6 +1014,8 @@ export function mountCoordinatedPaperScene(
     const state = stateAtTime(seconds);
     const phoneAngle = 90 + state.leftAngle - state.rightAngle;
     hingeAngle.value = phoneAngle;
+    // Mask composite: the cover's plane only while the cover faces the viewer.
+    if (inspectionMode === 7 && imagePlaneVisuals[0]) imagePlaneVisuals[0].mesh.visible = phoneAngle > 90;
     foldQuaternion.setFromAxisAngle(foldAxis, THREE.MathUtils.degToRad(phoneAngle) / 2);
     if (phoneHinge && hingeRest) phoneHinge.quaternion.copy(hingeRest).multiply(foldQuaternion);
     if (phoneLeaf && leafRest) phoneLeaf.quaternion.copy(leafRest).multiply(foldQuaternion);
@@ -1388,10 +1390,20 @@ export function mountCoordinatedPaperScene(
         material.depthWrite = !compositeMode;
         material.needsUpdate = true;
       }
-      for (const visual of imagePlaneVisuals) {
-        visual.mesh.visible = backgroundMode || compositeMode;
+      // In the mask composite the image planes are a flat backdrop: no depth,
+      // inner plane first and cover plane on top, so the translucent masks
+      // always composite over them instead of z-fighting where the planes and
+      // screens nearly coincide.
+      imagePlaneVisuals.forEach((visual, index) => {
+        const coverPlane = index === 0;
+        const material = visual.mesh.material as THREE.MeshBasicMaterial;
+        material.depthTest = !compositeMode;
+        material.depthWrite = !compositeMode;
+        material.needsUpdate = true;
+        visual.mesh.renderOrder = compositeMode ? (coverPlane ? -1 : -2) : 0;
+        visual.mesh.visible = backgroundMode || (compositeMode && (!coverPlane || hingeAngle.value > 90));
         visual.outline.visible = inspectionMode === 10;
-      }
+      });
       render();
     },
     dispose() {
