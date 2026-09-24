@@ -304,21 +304,18 @@ export default function CoordinatedPaperOpening({
       clack(open);
       return;
     }
-    const duration = 1600 + 800 * Math.abs(to - from) / 180;
+    const duration = 1000 + 500 * Math.abs(to - from) / 180;
     const started = performance.now();
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const animate = (now: number) => {
       const progress = reducedMotion ? 1 : Math.min(1, (now - started) / duration);
       // Ease the actual hinge angle, not the already-eased playback timeline.
-      // Keep a gentle launch, but give the landing a longer, quintic slowdown.
-      // This asymmetric curve reaches zero velocity without bounce or overshoot.
-      const remaining = 1 - progress;
-      const eased = 1 - remaining ** 5 * (1 + 5 * progress + 15 * progress * progress);
+      // Gentle launch, then speed only ever increases into rest, ending in the
+      // same short cushion as the clack: never slow down before the snap.
+      const eased = progress < 0.94
+        ? 0.975 * (progress / 0.94) ** 1.8
+        : 0.975 + 0.025 * (1 - (1 - (progress - 0.94) / 0.06) ** 3);
       const angle = from + (to - from) * eased;
-      if (!reducedMotion && Math.abs(to - angle) <= CLACK_ZONE && Math.abs(to - from) > CLACK_ZONE) {
-        clack(open);
-        return;
-      }
       showTime(progress === 1 ? (open ? SEQUENCE_DURATION : 0) : timeAtAngle(angle));
       if (progress < 1) foldFrame.current = requestAnimationFrame(animate);
       else setFoldDestination(null);
