@@ -230,6 +230,27 @@ export function mountTracingPaperScene(
           float shimmer=.45+.55*noise(local*2.2+vec2(uHintTime*.35,0.));
           color+=vec3(dotMask*wave*shimmer*uHint*.55);
         }
+        // Sheet border: a faint hairline so the edge reads once lifted, and
+        // during the hint a highlight scrolling around the perimeter that
+        // brightens where the wave reaches the edge.
+        {
+          vec2 local=(vUv-.5)*uPaperSize;
+          vec2 halfSize=uPaperSize*.5;
+          float edgeDistance=min(halfSize.x-abs(local.x),halfSize.y-abs(local.y));
+          float edgeAa=max(fwidth(edgeDistance),1e-4);
+          float rim=1.-smoothstep(.012,.012+edgeAa*1.5,edgeDistance);
+          color*=1.-.2*rim;
+          if(uHint>.001){
+            float around=atan(local.y/halfSize.y,local.x/halfSize.x)/6.2831853+.5;
+            float scroll=pow(.5+.5*sin(6.2831853*(around*2.-uHintTime*.3)),4.);
+            float cycle=mod(uHintTime,4.8);
+            float front=cycle/2.6*3.0;
+            float waveHit=exp(-pow((abs(local.x)-front)/.5,2.))*(1.-smoothstep(2.2,2.6,cycle));
+            float glow=1.-smoothstep(.0,.09,edgeDistance);
+            float highlight=mix(scroll*.8+waveHit*.9,.4,uHintStatic);
+            color=mix(color,vec3(1.),clamp(glow*highlight*uHint,0.,1.)*.85);
+          }
+        }
         gl_FragColor=vec4(color,1.);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
