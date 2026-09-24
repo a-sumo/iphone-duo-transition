@@ -71,3 +71,11 @@
   .tp-opening__gesture-hint { display: none; }
 }
 .tp-opening .tp-opening__primary { min-width: 76px; }
+
+/* Compact on/off switch in the inspector. */
+.tp-opening__effects label.tp-opening__switch { display: flex; align-items: center; gap: 10px; min-height: 36px; color: #3a3d44; font-size: 12px; cursor: pointer; }
+.tp-opening__switch input { appearance: none; position: relative; flex: none; width: 32px; height: 20px; min-height: 0; margin: 0; border-radius: 10px; background: rgba(0, 0, 0, .14); cursor: pointer; transition: background-color 150ms ease; }
+.tp-opening__switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); transition: transform 180ms cubic-bezier(.3, .7, .2, 1); }
+.tp-opening__switch input:checked { background: #1d1d1f; }
+.tp-opening__switch input:checked::after { transform: translateX(12px); }
+@media (prefers-reduced-motion: reduce) { .tp-opening__switch input, .tp-opening__switch input::after { transition: none; } }

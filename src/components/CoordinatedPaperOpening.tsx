@@ -62,12 +62,14 @@ export default function CoordinatedPaperOpening({
   const [time, setTime] = useState(0);
   const [foldDestination, setFoldDestination] = useState<boolean | null>(null);
   const [error, setError] = useState(false);
-  // Drag hint: billboarded dots on the fold arc (drawn by the scene).
-  // Shown at rest until the first real fold (remembered), and replayed
-  // whenever the pointer hovers the phone.
+  // Drag hint: billboarded dots on the fold arc (drawn by the scene). Shown
+  // only while the pointer is over or near the phone (always on touch, which
+  // has no hover), until the first real fold retires it. The inspector has a
+  // switch to turn it back on or off.
   const [hintDone, setHintDone] = useState(true);
   const [hintArmed, setHintArmed] = useState(false);
-  const [hoveringPhone, setHoveringPhone] = useState(false);
+  const [nearPhone, setNearPhone] = useState(false);
+  const nearFrame = useRef(0);
   const [grabbing, setGrabbing] = useState(false);
   const [surface, setSurface] = useState<ScreenSurface>("edge-darkening");
   const [triangles, setTriangles] = useState(false);
@@ -155,14 +157,15 @@ export default function CoordinatedPaperOpening({
 
   useEffect(() => {
     try { setHintDone(localStorage.getItem(FOLD_HINT_KEY) === "1"); } catch { setHintDone(false); }
+    if (window.matchMedia("(pointer: coarse)").matches) setNearPhone(true);
     const timer = window.setTimeout(() => setHintArmed(true), 1200);
     return () => window.clearTimeout(timer);
   }, []);
 
   // Any idle pose: the arc starts at the leaf's current angle, so the hint
   // also reads when the phone is partly open.
-  const showHint = hintArmed && !grabbing && !error &&
-    foldDestination === null && (!hintDone || hoveringPhone);
+  const showHint = hintArmed && !hintDone && !grabbing && !error &&
+    foldDestination === null && nearPhone;
 
   useEffect(() => {
     sceneRef.current?.setDragHint(showHint);
@@ -171,6 +174,22 @@ export default function CoordinatedPaperOpening({
   function markFoldHintDone() {
     setHintDone(true);
     try { localStorage.setItem(FOLD_HINT_KEY, "1"); } catch { /* storage unavailable */ }
+  }
+
+  function enableFoldHint() {
+    setHintDone(false);
+    try { localStorage.removeItem(FOLD_HINT_KEY); } catch { /* storage unavailable */ }
+  }
+
+  // Near = within 60 px of the phone's projected bounds.
+  function trackPointer(clientX: number, clientY: number) {
+    cancelAnimationFrame(nearFrame.current);
+    nearFrame.current = requestAnimationFrame(() => {
+      const rect = sceneRef.current?.phoneScreenRect();
+      const margin = 60;
+      setNearPhone(!!rect && clientX > rect.left - margin && clientX < rect.right + margin &&
+        clientY > rect.top - margin && clientY < rect.bottom + margin);
+    });
   }
 
   function showTime(nextTime: number) {
@@ -323,9 +342,13 @@ export default function CoordinatedPaperOpening({
         onPointerUpCapture={foldEnd} onPointerCancelCapture={foldEnd} onLostPointerCapture={foldEnd}
         onPointerMove={(event) => {
           if (event.pointerType !== "mouse" || foldDrag.current) return;
-          setHoveringPhone(!!sceneRef.current?.hitsPhoneSilhouette(event.clientX, event.clientY));
+          trackPointer(event.clientX, event.clientY);
         }}
-        onPointerLeave={() => setHoveringPhone(false)}
+        onPointerLeave={(event) => {
+          if (event.pointerType !== "mouse") return;
+          cancelAnimationFrame(nearFrame.current);
+          setNearPhone(false);
+        }}
         tabIndex={0} aria-label="Grab the moving screen and drag it around its hinge. Drag background to orbit. Arrow keys adjust fold."
         onKeyDown={(event) => {
           if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -402,6 +425,11 @@ export default function CoordinatedPaperOpening({
               sceneRef.current?.setEdgeDarkening(value);
             }} />
           <small>None <span>Strong</span></small>
+        </label>
+        <label className="tp-opening__switch">
+          <input type="checkbox" role="switch" checked={!hintDone}
+            onChange={(event) => (event.target.checked ? enableFoldHint() : markFoldHintDone())} />
+          <span>Drag hints</span>
         </label>
       </div>
       </section>

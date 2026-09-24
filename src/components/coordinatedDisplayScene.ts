@@ -37,8 +37,10 @@ export type CoordinatedPaperScene = {
   hitsPhoneSilhouette: (clientX: number, clientY: number) => boolean;
   moveGrab: (clientX: number, clientY: number) => number | null;
   endGrab: () => void;
-  /** Show or hide the flowing dot hint on the moving screen. */
+  /** Show or hide the flowing dot hint along the fold arc. */
   setDragHint: (active: boolean) => void;
+  /** The phone's projected bounds in client pixels, or null before load. */
+  phoneScreenRect: () => { left: number; top: number; right: number; bottom: number } | null;
   setOrbitEnabled: (enabled: boolean) => void;
   setBlurIntensity: (intensity: number) => void;
   setTransitionLength: (length: number) => void;
@@ -1313,6 +1315,23 @@ export function mountCoordinatedPaperScene(
       return THREE.MathUtils.lerp(grabPath[i].time, grabPath[i + 1].time, grabIndex - i);
     },
     endGrab() { grabPath = null; controls.enabled = moveView; },
+    phoneScreenRect() {
+      if (!phone) return null;
+      const box = new THREE.Box3().setFromObject(phone);
+      if (box.isEmpty()) return null;
+      const bounds = renderer.domElement.getBoundingClientRect();
+      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+      const corner = new THREE.Vector3();
+      for (let i = 0; i < 8; i++) {
+        corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z)
+          .project(camera);
+        const x = bounds.left + (corner.x + 1) / 2 * bounds.width;
+        const y = bounds.top + (1 - corner.y) / 2 * bounds.height;
+        left = Math.min(left, x); right = Math.max(right, x);
+        top = Math.min(top, y); bottom = Math.max(bottom, y);
+      }
+      return { left, top, right, bottom };
+    },
     setDragHint(active) {
       dragHintTarget = active ? 1 : 0;
       if (active && dragHint.value < 0.002) dragHintStart = performance.now();
