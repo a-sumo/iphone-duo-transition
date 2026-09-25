@@ -1,4 +1,4 @@
-# [Why the iPhone Duo Transition Feels So Good →](https://armandsumo.com/posts/iphone-duo-transition/)
+# [Why the iPhone Duo Transition Feels Good →](https://armandsumo.com/posts/iphone-duo-transition/)
 
 ![Source tree with screenshots of each lab](docs/readme/overview.png)
 
