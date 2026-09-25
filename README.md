@@ -1,4 +1,4 @@
-![iphone-duo-transition: the source tree, the transition, optical flow and detail energy views, and the three labs](docs/readme/overview.png)
+![iphone-duo-transition: source tree, with a screenshot and the governing equations of each lab](docs/readme/overview.png)
 
 ```sh
 npm install && npm run dev

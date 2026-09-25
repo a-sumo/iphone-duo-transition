@@ -1,5 +1,6 @@
 <!doctype html>
-<!-- Source for docs/readme/overview.png (captured at 2x). Keep in sync with src/. -->
+<!-- Source for docs/readme/overview.png (captured at 2x). Keep in sync with src/;
+     the equations are the ones in the shaders and renderedOpticalFlow.ts. -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -7,33 +8,66 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <style>
   html, body { margin: 0; background: #0b0b0c; }
-  main { width: 960px; padding: 56px 64px 60px; color: #c9c9cf; font: 400 15px/1.7 "JetBrains Mono", monospace; }
-  h1 { margin: 0 0 32px; font-size: 15px; font-weight: 700; color: #fff; }
+  main { position: relative; width: 1060px; padding: 56px 64px 64px; color: #c9c9cf; font: 400 15px/26px "JetBrains Mono", monospace; }
+  h1 { margin: 0; font-size: 15px; font-weight: 700; color: #fff; }
+  .abstract { width: 760px; margin: 10px 0 40px; color: #8b8e96; }
   pre { margin: 0; font: inherit; white-space: pre; }
   .d { color: #5c5f66; }
   .a { color: #6cb6ff; }
-  img { display: block; width: 100%; aspect-ratio: 3.4; object-fit: cover; margin: 40px 0; }
+  .row { display: grid; grid-template-columns: 470px 1fr 360px; margin-bottom: 6px; align-items: start; }
+  .link { height: 1px; margin-top: 13px; background: #3a3c42; }
+  .fig img { display: block; width: 360px; }
+  .fig img + img { margin-top: 6px; }
+  .eq { margin: 8px 0 0; color: #8b8e96; font-size: 13px; line-height: 20px; white-space: pre; }
 </style>
 </head>
 <body>
 <main id="overview">
 <h1>iphone-duo-transition</h1>
+<p class="abstract">Three.js reconstruction of the iPhone Duo fold transition. Each display is a stencil over a stationary image plane registered to it; a tracing-paper scattering model blurs and darkens what it reveals. Detail energy and optical flow are measured in screen space from 0° to 180°.</p>
+
 <pre>src/
 ├── main.tsx                          <span class="d">router</span>
-└── components/
-    ├── TracingPaperSimulation.tsx    <span class="a">#tracing-paper</span>
-    │   └── tracingPaperScene.ts
-    ├── CoordinatedPaperOpening.tsx   <span class="a">#iphone-duo</span>
-    │   └── coordinatedDisplayScene.ts
-    ├── PhonePerceptionExperiment.tsx <span class="a">#perception</span>
+└── components/</pre>
+
+<div class="row">
+<pre class="tree" data-fill>    ├── TracingPaperSimulation.tsx    <span class="a">#tracing-paper</span>
+    │   └── tracingPaperScene.ts</pre>
+<div class="link"></div>
+<div class="fig"><img src="img/tracing.jpg" alt="" /><p class="eq">r = gap · s / |ray_z|
+s = spread · (0.10 + 0.16 · grazing)
+32 rays</p></div>
+</div>
+
+<div class="row">
+<pre class="tree" data-fill>    ├── CoordinatedPaperOpening.tsx   <span class="a">#iphone-duo</span>
+    │   └── coordinatedDisplayScene.ts</pre>
+<div class="link"></div>
+<div class="fig"><img src="img/transition.jpg" alt="" /><p class="eq">r = gap · s / max(|ray · N|, 0.1)
+L = 1 − exp(−3.5 · d · r)
+96 taps</p></div>
+</div>
+
+<div class="row">
+<pre class="tree" data-fill>    ├── PhonePerceptionExperiment.tsx <span class="a">#perception</span>
     │   └── phonePerceptionScene.ts
-    │       └── renderedOpticalFlow.ts
-    ├── phoneFinish.ts                <span class="d">shared</span>
+    │       └── renderedOpticalFlow.ts</pre>
+<div class="link"></div>
+<div class="fig"><img src="img/energy.jpg" alt="" /><img src="img/flow.jpg" alt="" /><p class="eq">E = mean((Y − G5×5 ∗ Y)²) / E_open
+v = argmin SSD(9×9, ±16 px)
+|v_fwd + v_bwd| ≤ 1.5 px</p></div>
+</div>
+
+<pre>    ├── phoneFinish.ts                <span class="d">shared</span>
     └── labControls.css               <span class="d">shared</span></pre>
-<img src="img/three-views.jpg" alt="" />
-<pre><span class="a">#tracing-paper</span>  lifting paper off an image blurs it
-<span class="a">#iphone-duo</span>     the transition: stencil + paper blur
-<span class="a">#perception</span>     detail energy and optical flow, measured</pre>
 </main>
+<script>
+  // Continue the tree's vertical rule down each row to the height of its figure.
+  for (const tree of document.querySelectorAll("pre[data-fill]")) {
+    const row = tree.parentElement;
+    const lines = Math.ceil(row.querySelector(".fig").offsetHeight / 26) - tree.textContent.split("\n").length + 1;
+    tree.insertAdjacentHTML("beforeend", "\n    │".repeat(Math.max(0, lines)));
+  }
+</script>
 </body>
 </html>
