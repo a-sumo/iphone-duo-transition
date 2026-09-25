@@ -112,8 +112,9 @@ export default function CoordinatedPaperOpening({
   }, []);
 
 
-  // When embedded in the scroll-driven article simulator, the parent maps its
-  // pinned-scroll progress (0 → 1) onto the fold timeline (folded → open).
+  // When embedded in the scroll-driven article simulator, the parent's
+  // pinned-scroll progress (0 → 1) maps linearly onto the hinge (folded →
+  // open), so every bit of scroll moves the phone: no slow eased ends.
   // Manual dragging always wins; scroll only drives the pose when idle.
   useEffect(() => {
     if (window.parent === window) return;
@@ -121,7 +122,7 @@ export default function CoordinatedPaperOpening({
       if (event.data?.type !== "duo-scroll-progress") return;
       if (foldDrag.current) return;
       const progress = Math.min(1, Math.max(0, Number(event.data.progress) || 0));
-      const target = progress * SEQUENCE_DURATION;
+      const target = timeAtAngle(180 * (1 - progress));
       // Scroll into a detent: clack home and hold there until the reader
       // scrolls back out of the zone.
       const targetAngle = angleAtTime(target);
@@ -166,6 +167,7 @@ export default function CoordinatedPaperOpening({
       setHintDone(hintPref.current ? hintPref.current === "off" : localStorage.getItem(FOLD_HINT_KEY) === "1");
     } catch { setHintDone(false); }
     if (window.matchMedia("(pointer: coarse)").matches) setNearPhone(true);
+    if (new URLSearchParams(window.location.search).has("capture")) return;
     const timer = window.setTimeout(() => setHintArmed(true), 1200);
     return () => window.clearTimeout(timer);
   }, []);
@@ -202,6 +204,29 @@ export default function CoordinatedPaperOpening({
         clientY > rect.top - margin && clientY < rect.bottom + margin);
     });
   }
+
+  // ?capture: a scripting handle for frame-by-frame video export. The
+  // exporter drives the exact fold angle, camera, layer and effect values.
+  const capture = useRef<Record<string, (...args: never[]) => unknown>>({});
+  capture.current = {
+    loaded: () => sceneRef.current?.isLoaded() ?? false,
+    setAngle: ((angle: number) => showTime(timeAtAngle(angle))) as never,
+    orbit: ((azimuth: number, elevation: number) => {
+      setMoveView(true);
+      sceneRef.current?.setMoveView(true);
+      sceneRef.current?.setCameraOrbit(azimuth, elevation);
+    }) as never,
+    front: () => { setMoveView(false); sceneRef.current?.setMoveView(false); },
+    inspect: ((surface: ScreenSurface, triangles: boolean) => inspect(surface, triangles)) as never,
+    scattering: ((value: number) => { setScattering(value); sceneRef.current?.setBlurIntensity(value); }) as never,
+    darkening: ((value: number) => { setDarkening(value); sceneRef.current?.setEdgeDarkening(value); }) as never,
+    inspector: ((open: boolean) => setInspectorOpen(open)) as never,
+  };
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has("capture")) return;
+    document.documentElement.classList.add("duo-capture");
+    (window as unknown as { __duoCapture: typeof capture }).__duoCapture = capture;
+  }, []);
 
   function showTime(nextTime: number) {
     const clamped = Math.min(SEQUENCE_DURATION, Math.max(0, nextTime));
