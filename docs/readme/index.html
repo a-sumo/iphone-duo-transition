@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- Source for docs/readme/overview.png (captured at 2x). Keep in sync with src/;
-     the equations are the ones in the shaders and renderedOpticalFlow.ts. -->
+     images are stills from the rendered lab videos. -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -8,23 +8,24 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <style>
   html, body { margin: 0; background: #0b0b0c; }
-  main { position: relative; width: 1060px; padding: 56px 64px 64px; color: #c9c9cf; font: 400 15px/26px "JetBrains Mono", monospace; }
-  h1 { margin: 0; font-size: 15px; font-weight: 700; color: #fff; }
+  main { position: relative; width: 1160px; padding: 56px 64px 64px; color: #c9c9cf; font: 400 15px/26px "JetBrains Mono", monospace; }
+  h1 { margin: 0 0 32px; font-size: 15px; font-weight: 700; color: #fff; }
   .abstract { width: 760px; margin: 10px 0 40px; color: #8b8e96; }
   pre { margin: 0; font: inherit; white-space: pre; }
   .d { color: #5c5f66; }
   .a { color: #6cb6ff; }
-  .row { display: grid; grid-template-columns: 470px 1fr 360px; margin-bottom: 6px; align-items: start; }
+  .row { display: grid; grid-template-columns: 470px 1fr 540px; margin-bottom: 6px; align-items: start; }
   .link { height: 1px; margin-top: 13px; background: #3a3c42; }
-  .fig img { display: block; width: 360px; }
+  .fig img { display: block; width: 540px; }
+  .fig .strip img { width: 100%; }
   .fig img + img { margin-top: 6px; }
-  .eq { margin: 8px 0 0; color: #8b8e96; font-size: 13px; line-height: 20px; white-space: pre; }
+  .strip { display: grid; gap: 6px; margin-top: 6px; }
+  .strip img { width: 100%; aspect-ratio: var(--ar); object-fit: cover; }
 </style>
 </head>
 <body>
 <main id="overview">
 <h1>iphone-duo-transition</h1>
-<p class="abstract">Three.js reconstruction of the iPhone Duo fold transition. Each display is a stencil over a stationary image plane registered to it; a tracing-paper scattering model blurs and darkens what it reveals. Detail energy and optical flow are measured in screen space from 0° to 180°.</p>
 
 <pre>src/
 ├── main.tsx                          <span class="d">router</span>
@@ -34,18 +35,14 @@
 <pre class="tree" data-fill>    ├── TracingPaperSimulation.tsx    <span class="a">#tracing-paper</span>
     │   └── tracingPaperScene.ts</pre>
 <div class="link"></div>
-<div class="fig"><img src="img/tracing.jpg" alt="" /><p class="eq">r = gap · s / |ray_z|
-s = spread · (0.10 + 0.16 · grazing)
-32 rays</p></div>
+<div class="fig"><img src="img/tracing.jpg" alt="" /><div class="strip" style="grid-template-columns: repeat(3, 1fr); --ar: 1.5"><img src="img/tp-flat.jpg" alt="" /><img src="img/tp-lift.jpg" alt="" /><img src="img/tp-side.jpg" alt="" /></div></div>
 </div>
 
 <div class="row">
 <pre class="tree" data-fill>    ├── CoordinatedPaperOpening.tsx   <span class="a">#iphone-duo</span>
     │   └── coordinatedDisplayScene.ts</pre>
 <div class="link"></div>
-<div class="fig"><img src="img/transition.jpg" alt="" /><p class="eq">r = gap · s / max(|ray · N|, 0.1)
-L = 1 − exp(−3.5 · d · r)
-96 taps</p></div>
+<div class="fig"><img src="img/transition.jpg" alt="" /><div class="strip" style="grid-template-columns: repeat(4, 1fr); --ar: 1.25"><img src="img/layer-raw-mesh.jpg" alt="" /><img src="img/layer-screen-triangles.jpg" alt="" /><img src="img/layer-solid-mask.jpg" alt="" /><img src="img/layer-background.jpg" alt="" /><img src="img/layer-plane-outlines.jpg" alt="" /><img src="img/layer-mask-composite.jpg" alt="" /><img src="img/layer-matte-paper.jpg" alt="" /><img src="img/layer-edge-darkening.jpg" alt="" /></div></div>
 </div>
 
 <div class="row">
@@ -53,9 +50,7 @@ L = 1 − exp(−3.5 · d · r)
     │   └── phonePerceptionScene.ts
     │       └── renderedOpticalFlow.ts</pre>
 <div class="link"></div>
-<div class="fig"><img src="img/energy.jpg" alt="" /><img src="img/flow.jpg" alt="" /><p class="eq">E = mean((Y − G5×5 ∗ Y)²) / E_open
-v = argmin SSD(9×9, ±16 px)
-|v_fwd + v_bwd| ≤ 1.5 px</p></div>
+<div class="fig"><img src="img/energy.jpg" alt="" /><img src="img/energy-graph.jpg" alt="" /><img src="img/flow.jpg" alt="" /><img src="img/flow-graph.jpg" alt="" /></div>
 </div>
 
 <pre>    ├── phoneFinish.ts                <span class="d">shared</span>

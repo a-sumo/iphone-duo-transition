@@ -1,4 +1,6 @@
-![iphone-duo-transition: source tree, with a screenshot and the governing equations of each lab](docs/readme/overview.png)
+# [Why the iPhone Duo Transition Feels So Good →](https://armandsumo.com/posts/iphone-duo-transition/)
+
+![Source tree with screenshots of each lab](docs/readme/overview.png)
 
 ```sh
 npm install && npm run dev
