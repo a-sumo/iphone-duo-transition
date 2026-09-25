@@ -38,6 +38,23 @@ export default function TracingPaperSimulation({
     };
   }, []);
 
+  // ?capture: a scripting handle for frame-by-frame video export (fold side
+  // and angle, camera, ray spread), with the controls hidden.
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has("capture")) return;
+    document.documentElement.classList.add("tp-capture");
+    let loaded = false;
+    sceneRef.current?.ready.then(() => { loaded = true; });
+    (window as unknown as { __tracingCapture: unknown }).__tracingCapture = {
+      current: {
+        loaded: () => loaded,
+        fold: (side: "left" | "right", degrees: number) => sceneRef.current?.renderFold(side, degrees),
+        orbit: (tilt: number, azimuth: number) => sceneRef.current?.setCameraOrbit(tilt, azimuth),
+        spread: (value: number) => sceneRef.current?.setRaySpread(value / 100),
+      },
+    };
+  }, []);
+
   useEffect(() => {
     const syncFullscreen = () => {
       setFullscreen(document.fullscreenElement === figureRef.current);

@@ -10,6 +10,8 @@ export type TracingPaperScene = {
   setRaySpread: (amount: number) => void;
   setMoveView: (enabled: boolean) => void;
   resetTopView: () => void;
+  /** Camera tilted `tilt`° from top-down, turned `azimuth`° about the sheet normal. */
+  setCameraOrbit: (tilt: number, azimuth: number) => void;
   dispose: () => void;
 };
 
@@ -19,7 +21,9 @@ export function mountTracingPaperScene(
   onFoldChange?: (side: FoldSide, degrees: number) => void,
 ): TracingPaperScene {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  // ?capture renders frames for video export at the full device pixel ratio.
+  const captureMode = new URLSearchParams(window.location.search).has("capture");
+  renderer.setPixelRatio(captureMode ? window.devicePixelRatio || 1 : Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   stage.append(renderer.domElement);
 
@@ -533,6 +537,18 @@ export function mountTracingPaperScene(
       if (enabled) drag = null;
     },
     resetTopView,
+    setCameraOrbit(tilt, azimuth) {
+      cameraMoved = true;
+      const t = THREE.MathUtils.degToRad(tilt), a = THREE.MathUtils.degToRad(azimuth);
+      const d = fitDistance();
+      const wasDamping = controls.enableDamping;
+      controls.enableDamping = false;
+      controls.target.set(0, 0, 0);
+      camera.position.set(d * Math.sin(t) * Math.sin(a), -d * Math.sin(t) * Math.cos(a), d * Math.cos(t));
+      controls.update();
+      controls.enableDamping = wasDamping;
+      renderer.render(scene, camera);
+    },
     dispose() {
       cancelAnimationFrame(frame);
       renderer.domElement.removeEventListener("pointerdown", pointerDown);

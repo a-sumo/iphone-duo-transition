@@ -138,8 +138,8 @@
   gap: 8px;
   padding: 0 16px 10px;
   color: #646464;
-  font-size: 9px;
-  letter-spacing: 0.04em;
+  font-size: 13px;
+  letter-spacing: 0.03em;
 }
 
 .tp-sim-artwork cite {
@@ -212,4 +212,9 @@
     flex-direction: column;
     gap: 2px;
   }
+}
+
+/* Video export (?capture): the scene and the artwork credit only. */
+.tp-capture .tp-sim-controls {
+  display: none;
 }
