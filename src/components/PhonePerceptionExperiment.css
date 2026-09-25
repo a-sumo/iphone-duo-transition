@@ -1,0 +1,451 @@
+.phone-study {
+  max-width: 1160px;
+  margin: auto;
+  padding: 16px 24px;
+  color: #282728;
+  font:
+    13px "Mulish",
+    system-ui,
+    sans-serif;
+}
+.phone-study-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: #3a3d44;
+  font: 500 13px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  letter-spacing: -0.01em;
+}
+.phone-study-fold {
+  color: #6b6f78;
+  font-size: 12px;
+}
+.phone-study-fold output {
+  color: #1d1d1f;
+}
+/* Give recordings the full browser width; article iframes retain their layout. */
+.perception-standalone .phone-study {
+  max-width: none;
+  padding: 12px 24px;
+}
+.perception-standalone .phone-study-pair {
+  gap: 32px;
+  margin-top: 12px;
+  max-width: 900px;
+  margin-inline: auto;
+}
+.perception-standalone .phone-study-pair section > div {
+  width: min(100%, calc(clamp(150px, 27svh, 300px) / 0.74));
+}
+.perception-standalone .phone-study-chart {
+  max-width: 1000px;
+  margin-top: 6px;
+}
+.perception-standalone .phone-study-chart svg {
+  max-height: none;
+}
+.perception-standalone .phone-study-chart text {
+  font-size: 13px;
+}
+@media (orientation: landscape) {
+  .perception-standalone .phone-study-pair {
+    width: min(100%, calc(clamp(150px, 33svh, 360px) / 0.37 + 12px));
+    max-width: none;
+    gap: 12px;
+  }
+  .perception-standalone .phone-study-pair section > div {
+    width: min(100%, calc(clamp(150px, 33svh, 360px) / 0.74));
+  }
+}
+@media (max-width: 650px) {
+  .perception-standalone .phone-study {
+    padding: 12px;
+  }
+  .perception-standalone .phone-study-pair {
+    gap: 6px;
+  }
+}
+@media (max-aspect-ratio: 4/5) and (min-height: 700px) {
+  .perception-standalone .phone-study-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .perception-standalone .phone-study-pair section > div {
+    width: min(100%, calc(22svh / 0.74));
+    margin-top: 2px;
+  }
+  .perception-standalone .phone-study-chart-legend {
+    gap: 8px 16px;
+  }
+}
+.phone-study-transport {
+  margin-top: 12px;
+}
+.phone-study-controls label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.phone-study input {
+  width: 140px;
+}
+.phone-study output {
+  font-variant-numeric: tabular-nums;
+}
+.phone-study-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 18px;
+}
+.phone-study h2 {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0;
+}
+.phone-study canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.phone-study-pair section > div {
+  touch-action: none;
+  cursor: grab;
+  position: relative;
+  /* Crop only the blank render margins; preserve camera and analysis pixels. */
+  width: min(100%, calc(max(200px, 100svh - 350px) / 0.74));
+  aspect-ratio: 1 / 0.74;
+  margin: 6px auto 0;
+  overflow: hidden;
+}
+.phone-study-pair section > div:active {
+  cursor: grabbing;
+}
+.phone-study-pair section > div:focus-visible {
+  outline: 2px solid #6482dc;
+  outline-offset: 2px;
+}
+.phone-study-pair section > div > canvas {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.phone-study canvas.phone-study-arrows {
+  pointer-events: none;
+}
+.phone-study-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: #60636b;
+  font-size: 12px;
+}
+.phone-study-key span {
+  display: inline-block;
+  width: 90px;
+  height: 10px;
+  border-radius: 3px;
+}
+.phone-study-energy {
+  background: linear-gradient(90deg, #05031a, #c71f52, #ffee61);
+}
+.phone-study details {
+  max-width: 730px;
+  margin: 8px auto 0;
+  color: #6a6d73;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.phone-study summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #f3f7fc;
+  color: #487b9b;
+  font-weight: 600;
+}
+.phone-study summary::-webkit-details-marker {
+  display: none;
+}
+.phone-study summary:hover {
+  background: #eaf2fa;
+}
+.phone-study-disclosure {
+  flex: none;
+}
+.phone-study details[open] .phone-study-disclosure-vertical {
+  display: none;
+}
+.phone-study-method {
+  padding: 0 12px;
+}
+.phone-study-method h3 {
+  margin: 18px 0 6px;
+  font:
+    600 13px/1.5 "Mulish",
+    sans-serif;
+  color: #282728;
+}
+@media (max-width: 650px) {
+  .phone-study {
+    padding: 14px;
+  }
+  .phone-study-pair {
+    gap: 6px;
+  }
+  .phone-study-controls {
+    gap: 8px;
+  }
+  .phone-study input {
+    width: 110px;
+  }
+}
+.phone-study-blur {
+  margin: 0;
+}
+.phone-study-blur output {
+  order: 2;
+}
+.phone-study-source {
+  text-align: center;
+  font-size: 11px;
+  color: #6a6d73;
+  margin-top: 12px;
+}
+.phone-study-controls .phone-study-content {
+  position: relative;
+  display: inline-flex;
+}
+.phone-study-content > svg {
+  position: absolute;
+  left: 10px;
+  width: 18px;
+  height: 18px;
+  color: #6482dc;
+  pointer-events: none;
+}
+.phone-study-content > svg.phone-study-chevron {
+  left: auto;
+  right: 9px;
+  width: 16px;
+}
+.phone-study-content select {
+  padding: 0 32px 0 36px;
+  min-width: 155px;
+}
+.phone-study-equation {
+  font:
+    12px/1.9 "Roboto Mono",
+    monospace;
+  color: #282728;
+  overflow-wrap: anywhere;
+}
+.phone-study-method p {
+  margin: 12px 0;
+}
+.phone-study-chart {
+  max-width: 800px;
+  width: 100%;
+  margin: 12px auto 0;
+  padding: 12px 0 0;
+  border-top: 1px solid rgba(100, 130, 220, 0.2);
+}
+.phone-study-chart svg {
+  display: block;
+  width: 100%;
+  max-height: 170px;
+}
+.phone-study-chart text {
+  font:
+    11px "Roboto Mono",
+    ui-monospace,
+    sans-serif;
+  fill: #60636b;
+}
+.phone-study-scrubber {
+  touch-action: none;
+  cursor: ew-resize;
+  user-select: none;
+}
+.phone-study-scrubber:focus-visible {
+  outline: 2px solid #6482dc;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.phone-study-chart p {
+  font-size: 11px;
+  color: #60636b;
+  text-align: center;
+  line-height: 1.6;
+}
+.phone-study-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #487b9b;
+  font-size: 12px;
+}
+.phone-study-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #dfedf7;
+  border-top-color: #0281c1;
+  border-radius: 50%;
+  animation: phone-study-spin 900ms linear infinite;
+}
+@keyframes phone-study-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .phone-study-spinner {
+    animation: none;
+  }
+}
+.phone-study-chart > .phone-study-loading {
+  height: min(170px, 28vw);
+  margin: 0;
+}
+.phone-study-chart-legend {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.phone-study-series {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #487b9b;
+}
+.phone-study-series::before {
+  content: "";
+  width: 18px;
+  border-top: 3px solid #8cc8ee;
+}
+.phone-study-series.treatment {
+  color: #026b9f;
+}
+.phone-study-series.treatment::before {
+  border-top: 3px solid #0281c1;
+}
+.phone-study h2.phone-study-label {
+  width: fit-content;
+  margin: 0 auto;
+  padding: 5px 10px;
+  border-radius: 7px;
+  color: #487b9b;
+  background: #e8f5fc;
+}
+.phone-study h2.phone-study-label.treatment {
+  color: #fff;
+  background: #0281c1;
+}
+.phone-study button:focus-visible,
+.phone-study select:focus-visible,
+.phone-study summary:focus-visible {
+  outline: 2px solid #6482dc;
+  outline-offset: 3px;
+}
+
+/* Solo view: one side of the comparison, enlarged. */
+.phone-study .phone-study-pair.is-solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+.phone-study .phone-study-pair.is-solo section > div {
+  width: min(100%, calc(max(200px, 100svh - 350px) / 0.74 * 1.6));
+}
+.perception-standalone .phone-study .phone-study-pair.is-solo section > div {
+  width: min(100%, calc(clamp(150px, 27svh, 300px) / 0.74 * 2));
+}
+.phone-study h2.phone-study-label {
+  padding: 0;
+}
+.phone-study h2.phone-study-label button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 0;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.phone-study h2.phone-study-label button[aria-pressed="true"] {
+  background: transparent;
+  color: inherit;
+}
+.phone-study h2.phone-study-label svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
+}
+.phone-study h2.phone-study-label button:hover svg {
+  opacity: 1;
+}
+
+/* Video export (?capture=solo|full): no controls or notes in frame.
+   !important: these must beat the standalone lab's responsive sizing. */
+.perception-capture .phone-study-controls,
+.perception-capture .phone-study details,
+.perception-capture .phone-study-source {
+  display: none !important;
+}
+.perception-capture .phone-study {
+  max-width: none !important;
+  padding: 20px 32px !important;
+}
+/* Solo: one large phone filling the frame, nothing else. */
+.perception-capture--solo .phone-study {
+  display: grid !important;
+  place-items: center;
+  min-height: 100svh;
+  padding: 0 !important;
+}
+.perception-capture--solo .phone-study-label,
+.perception-capture--solo .phone-study-key,
+.perception-capture--solo .phone-study-chart {
+  display: none !important;
+}
+.perception-capture--solo .phone-study-pair {
+  display: block !important;
+  width: 100vw !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+.perception-capture--solo .phone-study-pair section > div {
+  width: min(100vw - 40px, calc((100svh - 20px) / 0.74)) !important;
+  margin: 0 auto !important;
+}
+/* Full: larger side-by-side pair above a compact graph. */
+.perception-capture--full .phone-study-pair {
+  width: min(100%, calc((100svh - 330px) / 0.37 + 40px)) !important;
+  max-width: none !important;
+  gap: 40px !important;
+  margin-inline: auto;
+}
+.perception-capture--full .phone-study-pair section > div {
+  width: min(100%, calc((100svh - 330px) / 0.74)) !important;
+}
+.perception-capture--full .phone-study-chart {
+  max-width: 820px !important;
+}

@@ -9,3 +9,5 @@ nav .source { margin-left: auto; }
 main { flex: 1; min-height: 0; }
 main .tp-opening--standalone, main .tp-sim--standalone { height: 100%; }
 .notice { padding: 32px; max-width: 600px; margin: auto; line-height: 1.6; }
+/* The perception lab is a long page (phones, graph, notes): scroll within main. */
+main.main--scroll { overflow-y: auto; }
