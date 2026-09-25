@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- Source for docs/readme/overview.png (captured at 2x). Keep in sync with src/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>iphone-duo-transition</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; background: #0b0b0c; }
+  main { width: 960px; padding: 56px 64px 60px; color: #c9c9cf; font: 400 15px/1.7 "JetBrains Mono", monospace; }
+  h1 { margin: 0 0 32px; font-size: 15px; font-weight: 700; color: #fff; }
+  pre { margin: 0; font: inherit; white-space: pre; }
+  .d { color: #5c5f66; }
+  .a { color: #6cb6ff; }
+  img { display: block; width: 100%; aspect-ratio: 3.4; object-fit: cover; margin: 40px 0; }
+</style>
+</head>
+<body>
+<main id="overview">
+<h1>iphone-duo-transition</h1>
+<pre>src/
+├── main.tsx                          <span class="d">router</span>
+└── components/
+    ├── TracingPaperSimulation.tsx    <span class="a">#tracing-paper</span>
+    │   └── tracingPaperScene.ts
+    ├── CoordinatedPaperOpening.tsx   <span class="a">#iphone-duo</span>
+    │   └── coordinatedDisplayScene.ts
+    ├── PhonePerceptionExperiment.tsx <span class="a">#perception</span>
+    │   └── phonePerceptionScene.ts
+    │       └── renderedOpticalFlow.ts
+    ├── phoneFinish.ts                <span class="d">shared</span>
+    └── labControls.css               <span class="d">shared</span></pre>
+<img src="img/three-views.jpg" alt="" />
+<pre><span class="a">#tracing-paper</span>  lifting paper off an image blurs it
+<span class="a">#iphone-duo</span>     the transition: stencil + paper blur
+<span class="a">#perception</span>     detail energy and optical flow, measured</pre>
+</main>
+</body>
+</html>
